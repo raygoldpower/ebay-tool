@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eBay Sourcing Master PRO 2026</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM (UMD) -->
+    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    <!-- Prop-Types (Recharts 종속성) -->
+    <script src="https://cdn.jsdelivr.net/npm/prop-types@15.8.1/prop-types.min.js"></script>
+    <!-- Recharts (UMD) -->
+    <script src="https://cdn.jsdelivr.net/npm/recharts@2.12.7/umd/Recharts.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* 슬라이더 스타일 커스텀 */
+        input[type=range] {
+            accent-color: #2563eb;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
+        const { 
+            LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer 
+        } = window.Recharts;
+
+        const App = () => {
+            const [keyword, setKeyword] = useState('');
+            const [isSearching, setIsSearching] = useState(false);
+            const [exchangeRate, setExchangeRate] = useState(1400); 
+            const [manualCost, setManualCost] = useState(64000);
+            const [manualL, setManualL] = useState(30);
+            const [manualW, setManualW] = useState(20);
+            const [manualH, setManualH] = useState(15);
+            const [manualActualWeight, setManualActualWeight] = useState(0.5);
+            const [targetMargin, setTargetMargin] = useState(15);
+            const [competitorPrice, setCompetitorPrice] = useState(120); 
+            const [origin, setOrigin] = useState('KR'); 
+            const [shipMethod, setShipMethod] = useState('AIR'); 
+            const [htsSection, setHtsSection] = useState('SEC_64_67');
+
+            const HTS_DATA = {
+                "SEC_64_67": { name: "신발/인솔", base_rate: 0.08, is_metal: false },
+                "SEC_84_85": { name: "전자/기계부품", base_rate: 0.02, is_metal: true },
+                "SEC_16_MANDU": { name: "가공식품(만두 등)", base_rate: 0.06, is_metal: false },
+                "SEC_33_COSM": { name: "화장품", base_rate: 0.03, is_metal: false },
+                "SEC_95_TOY": { name: "장난감", base_rate: 0.02, is_metal: false },
+                "SEC_90_MED": { name: "의료기기", base_rate: 0.009, is_metal: true },
+                "SEC_95_SPRT": { name: "스포츠용품", base_rate: 0.025, is_metal: false },
+                "SEC_61_62": { name: "의류(Apparel)", base_rate: 0.165, is_metal: false },
+                "SEC_94_FURN": { name: "가구", base_rate: 0.025, is_metal: false },
+                "SEC_49_BOOK": { name: "책/인쇄물", base_rate: 0.00, is_metal: false },
+                "SEC_16_21": { name: "일반 식품", base_rate: 0.06, is_metal: false },
+                "SEC_85_ELEC": { name: "가전/전자제품", base_rate: 0.05, is_metal: false },
+                "SEC_39_69": { name: "식기류", base_rate: 0.08, is_metal: false },
+                "SEC_85_PHON": { name: "핸드폰", base_rate: 0.00, is_metal: false },
+                "SEC_39_CASE": { name: "폰케이스", base_rate: 0.07, is_metal: false },
+                "SEC_39_3D": { name: "3D프린터 출력물", base_rate: 0.07, is_metal: false },
+            };
+
+            const CUSTOMS_2026 = {
+                GLOBAL_SURCHARGE: 0.10, KR_MIN_TARIFF: 0.15, MPF_RATE: 0.003464, HMF_RATE: 0.00125,
+                MPF_CONFIG: { INFORMAL: 2.69, FORMAL_MIN: 33.58, FORMAL_MAX: 651.50 }
+            };
+
+            const EBAY_CATEGORIES = {
+                GENERAL: { name: '일반 잡화', fee: 0.15 },
+                ELECTRONICS: { name: '전자제품', fee: 0.12 },
+                CLOTHING: { name: '의류/신발', fee: 0.125 },
+                COLLECTIBLES: { name: '수집품', fee: 0.13 },
+            };
+            const [selectedCat, setSelectedCat] = useState('GENERAL');
+            const PAYONEER_FEE = 0.012; 
+            const DOM_SHIPPING = 3000;
+
+            const CARRIERS = {
+                FedEx: { name: '페덱스', base: 15000, rate: 25000, divisor: 5000, color: 'text-purple-600', bg: 'bg-purple-50' },
+                Lincos: { name: '린코스', base: 12000, rate: 18000, divisor: 6000, color: 'text-blue-600', bg: 'bg-blue-50' },
+                EMS: { name: 'EMS', base: 22000, rate: 15000, divisor: null, color: 'text-red-600', bg: 'bg-red-50' }
+            };
+
+            // Lucide 아이콘 초기화
+            useEffect(() => {
+                if (window.lucide) window.lucide.createIcons();
+            }, [htsSection, origin, selectedCat, manualActualWeight, manualL, manualW, manualH]);
+
+            const comparisonData = useMemo(() => {
+                const currentEbayFee = EBAY_CATEGORIES[selectedCat].fee;
+                const section = HTS_DATA[htsSection];
+
+                return Object.keys(CARRIERS).map(key => {
+                    const carrier = CARRIERS[key];
+                    let volWeight = 0;
+                    let chargeableWeight = manualActualWeight;
+                    let comments = [];
+                    let isCriticalError = false;
+
+                    if (carrier.divisor) {
+                        volWeight = (manualL * manualW * manualH) / carrier.divisor;
+                        chargeableWeight = Math.max(manualActualWeight, volWeight);
+                    }
+
+                    if (key === 'FedEx' && manualActualWeight > 24.95) comments.push("실중량 24.95kg 초과: 추가 수수료 발생");
+                    if (key === 'Lincos' && manualActualWeight > 20.0) { comments.push("린코스 중량 초과(20kg)"); isCriticalError = true; }
+                    if (key === 'EMS' && manualActualWeight > 30.0) { comments.push("EMS 중량 초과(30kg)"); isCriticalError = true; }
+
+                    const intlShipping = carrier.base + (chargeableWeight * carrier.rate);
+                    const totalOutflowKRW = manualCost + DOM_SHIPPING + intlShipping;
+
+                    let appliedDutyRate = origin === "KR" ? Math.max(section.base_rate, CUSTOMS_2026.KR_MIN_TARIFF) : section.base_rate;
+                    let finalDutyRate = appliedDutyRate + CUSTOMS_2026.GLOBAL_SURCHARGE;
+                    if (origin === "CN") finalDutyRate += 0.25;
+
+                    const mpfInformalUSD = CUSTOMS_2026.MPF_CONFIG.INFORMAL;
+                    const mpfInformalKRW = mpfInformalUSD * exchangeRate;
+                    const denominator = (1 - currentEbayFee - PAYONEER_FEE - (targetMargin / 100) - finalDutyRate);
+                    
+                    let priceUSD = 0;
+                    let dutyKRW = 0;
+                    let mpfKRW = mpfInformalKRW;
+                    let hmfKRW = 0;
+                    let requiredRevKRW = 0;
+
+                    if (denominator > 0) {
+                        requiredRevKRW = (totalOutflowKRW + mpfInformalKRW) / denominator;
+                        priceUSD = requiredRevKRW / exchangeRate;
+                        if (priceUSD >= 2500) {
+                            const formalMPFKRW = Math.max(
+                                Math.min(requiredRevKRW * CUSTOMS_2026.MPF_RATE, CUSTOMS_2026.MPF_CONFIG.FORMAL_MAX * exchangeRate),
+                                CUSTOMS_2026.MPF_CONFIG.FORMAL_MIN * exchangeRate
+                            );
+                            mpfKRW = formalMPFKRW;
+                            requiredRevKRW = (totalOutflowKRW + mpfKRW) / denominator;
+                            priceUSD = requiredRevKRW / exchangeRate;
+                        }
+                        dutyKRW = requiredRevKRW * finalDutyRate;
+                        if (shipMethod === "SEA") hmfKRW = requiredRevKRW * CUSTOMS_2026.HMF_RATE;
+                    }
+
+                    if (origin === "KR") comments.push("[2026 개정] 한국산 제품 관세 하한선 15% 적용 중");
+                    if (section.is_metal) comments.push("[주의] 금속 함유 시 25% 할증 관세 가능성");
+                    if (priceUSD > 800) comments.push("[위험] 미국 무관세 한도($800) 초과");
+
+                    return {
+                        key, ...carrier, chargeableWeight: chargeableWeight.toFixed(2), volWeight: volWeight.toFixed(2),
+                        intlShipping, priceUSD: priceUSD > 0 ? priceUSD.toFixed(2) : "산출 불가",
+                        profitKRW: Math.floor(requiredRevKRW * (targetMargin / 100)),
+                        dutyKRW, mpfKRW, hmfKRW, finalDutyRate: (finalDutyRate * 100).toFixed(1),
+                        entryType: priceUSD < 2500 ? "약식(Informal)" : "정식(Formal)",
+                        comments, isCriticalError
+                    };
+                });
+            }, [manualL, manualW, manualH, manualActualWeight, manualCost, targetMargin, exchangeRate, selectedCat, origin, shipMethod, htsSection]);
+
+            const validData = comparisonData.filter(d => !d.isCriticalError && d.priceUSD !== "산출 불가");
+            const recommendedInfo = validData.length > 0 
+                ? validData.reduce((prev, curr) => parseFloat(prev.priceUSD) < parseFloat(curr.priceUSD) ? prev : curr)
+                : comparisonData[0];
+
+            const competitivenessScore = useMemo(() => {
+                if (!competitorPrice || isNaN(recommendedInfo.priceUSD)) return 0;
+                const diff = ((competitorPrice - parseFloat(recommendedInfo.priceUSD)) / competitorPrice) * 100;
+                return Math.min(Math.max(Math.floor(50 + diff * 2.5), 0), 100);
+            }, [competitorPrice, recommendedInfo]);
+
+            // 차트 데이터 시뮬레이션
+            const chartData = [
+                { name: '1월', value: 400 },
+                { name: '2월', value: 300 },
+                { name: '3월', value: 600 },
+                { name: '4월', value: 800 },
+                { name: '5월', value: 750 },
+                { name: '현재', value: 950 },
+            ];
+
+            return (
+                <div className="min-h-screen pb-20">
+                    <header className="bg-white border-b sticky top-0 z-40 px-6 py-6 flex justify-between items-center shadow-sm">
+                        <div className="flex items-center gap-3">
+                            <div className="p-3 bg-blue-600 rounded-xl text-white shadow-lg flex items-center justify-center">
+                                <i data-lucide="package" style={{width: 28, height: 28}}></i>
+                            </div>
+                            <h1 className="text-3xl font-black tracking-tighter text-slate-800 uppercase">eBay Sourcing Master <span className="text-blue-600 font-black">PRO 2026</span></h1>
+                        </div>
+                        <div className="text-base font-bold text-slate-700 bg-slate-100 px-6 py-3 rounded-2xl border border-slate-200">
+                            환율: <span className="text-blue-600 font-black">₩{exchangeRate.toLocaleString()}</span>
+                        </div>
+                    </header>
+
+                    <main className="max-w-7xl mx-auto p-6 space-y-12">
+                        <section className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-stretch">
+                            <div className="lg:col-span-5 bg-white p-10 rounded-[3rem] border shadow-md space-y-10">
+                                <h2 className="text-2xl font-bold flex items-center gap-3 text-slate-700 border-b pb-6 uppercase">
+                                    <i data-lucide="calculator" className="text-blue-500"></i> 소싱 정밀 데이터 입력
+                                </h2>
+                                <div className="grid grid-cols-4 gap-5">
+                                    {[['가로', manualL, setManualL], ['세로', manualW, setManualW], ['높이', manualH, setManualH], ['무게', manualActualWeight, setManualActualWeight]].map(([label, val, set]) => (
+                                        <div key={label} className="space-y-3 text-center">
+                                            <p className="text-sm font-black text-slate-500 uppercase tracking-widest">{label}</p>
+                                            <input type="number" value={val} onChange={(e) => set(Number(e.target.value))} className="w-full bg-slate-50 border-none rounded-2xl p-5 text-center font-bold text-xl outline-none shadow-inner focus:ring-4 focus:ring-blue-100"/>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="grid grid-cols-2 gap-8">
+                                    <div className="bg-slate-50 p-6 rounded-[2.5rem] shadow-inner border border-slate-100">
+                                        <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2 uppercase tracking-widest"><i data-lucide="globe" size={16}></i> 원산지</p>
+                                        <select value={origin} onChange={(e) => setOrigin(e.target.value)} className="bg-transparent text-2xl font-black w-full outline-none text-blue-600 cursor-pointer">
+                                            <option value="KR">한국 (KR)</option>
+                                            <option value="CN">중국 (CN)</option>
+                                            <option value="OTHER">제3국산</option>
+                                        </select>
+                                    </div>
+                                    <div className="bg-slate-50 p-6 rounded-[2.5rem] shadow-inner border border-slate-100">
+                                        <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2 uppercase tracking-widest"><i data-lucide="truck" size={16}></i> 국내 매입가</p>
+                                        <input type="number" value={manualCost} onChange={(e) => setManualCost(Number(e.target.value))} className="bg-transparent text-2xl font-black w-full outline-none text-green-600"/>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div className="space-y-4">
+                                        <p className="text-sm font-black text-slate-500 uppercase tracking-widest">HTS 카테고리</p>
+                                        <select value={htsSection} onChange={(e) => setHtsSection(e.target.value)} className="w-full bg-slate-100 border-none rounded-2xl p-5 text-lg font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500">
+                                            {Object.keys(HTS_DATA).map(k => (
+                                                <option key={k} value={k}>{HTS_DATA[k].name}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-4">
+                                        <p className="text-sm font-black text-slate-500 uppercase tracking-widest">운송 수단</p>
+                                        <select value={shipMethod} onChange={(e) => setShipMethod(e.target.value)} className="w-full bg-slate-100 border-none rounded-2xl p-5 text-lg font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500">
+                                            <option value="AIR">항공 (AIR)</option>
+                                            <option value="SEA">해상 (SEA)</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div className="pt-6">
+                                    <p className="text-base font-bold text-slate-600 mb-5 uppercase tracking-widest">목표 마진율: <span className="text-blue-600 font-black">{targetMargin}%</span></p>
+                                    <input type="range" min="5" max="40" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"/>
+                                </div>
+                            </div>
+
+                            <div className="lg:col-span-7 bg-slate-900 rounded-[4rem] p-12 text-white relative overflow-hidden flex flex-col justify-between shadow-2xl">
+                                <div className="relative z-10 space-y-12">
+                                    <div className="flex flex-col md:flex-row justify-between items-center md:items-start gap-8">
+                                        <div className="space-y-3">
+                                            <h3 className="text-blue-400 font-black flex items-center gap-3 uppercase tracking-[0.2em] text-lg">
+                                                <i data-lucide="zap"></i> 2026 개정 관세 적용 소싱 전략
+                                            </h3>
+                                            <p className="text-slate-500 text-base font-medium italic text-center md:text-left">추천: {recommendedInfo.name} | {recommendedInfo.entryType}</p>
+                                        </div>
+                                        {parseFloat(recommendedInfo.priceUSD) > 800 && (
+                                            <div className="bg-red-500/20 text-red-400 px-6 py-3 rounded-2xl border border-red-500/30 shadow-lg animate-pulse flex items-center gap-2">
+                                                <i data-lucide="shield-alert"></i><span className="text-sm font-black uppercase">관세 주의</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-16">
+                                        <div className="space-y-8 text-center md:text-left">
+                                            <p className="text-slate-400 text-sm font-black uppercase tracking-[0.3em]">권장 무료배송 리스팅 가격</p>
+                                            <div className="flex items-baseline justify-center md:justify-start gap-4 leading-none">
+                                                <span className="text-9xl font-black text-white tracking-tighter">${recommendedInfo.priceUSD}</span>
+                                                <span className="text-blue-400 font-black text-3xl">USD</span>
+                                            </div>
+                                            <div className="flex items-center gap-3 text-slate-300 text-base font-bold bg-white/5 p-5 rounded-[2rem] border border-white/5 w-fit mx-auto md:mx-0">
+                                                <i data-lucide="check-circle-2" className="text-green-500"></i>
+                                                <span>정산 매출 예상: ₩{(parseFloat(recommendedInfo.priceUSD) * exchangeRate).toLocaleString(undefined, {maximumFractionDigits:0})}</span>
+                                            </div>
+                                        </div>
+                                        <div className="bg-white/5 p-12 rounded-[3.5rem] border border-white/10 flex flex-col justify-between backdrop-blur-xl">
+                                            <p className="text-slate-400 text-sm font-black uppercase tracking-widest mb-4">경쟁력 지수</p>
+                                            <div className="flex items-end gap-5">
+                                                <span className={`text-8xl font-black ${competitivenessScore > 70 ? 'text-green-400' : competitivenessScore > 40 ? 'text-yellow-400' : 'text-red-400'}`}>{competitivenessScore}</span>
+                                                <span className="text-slate-500 font-bold text-xl mb-4 uppercase tracking-widest">Pts</span>
+                                            </div>
+                                            <div className="mt-10 h-4 bg-white/10 rounded-full overflow-hidden shadow-inner">
+                                                <div className={`h-full transition-all duration-1000 ${competitivenessScore > 70 ? 'bg-green-500' : competitivenessScore > 40 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${competitivenessScore}%` }}></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-10 pt-12 border-t border-white/10">
+                                        <div className="space-y-3"><p className="text-sm text-slate-500 font-bold uppercase tracking-widest text-center md:text-left">순수익액</p><p className="text-3xl font-black text-green-400 text-center md:text-left">₩{recommendedInfo.profitKRW.toLocaleString()}</p></div>
+                                        <div className="space-y-3"><p className="text-sm text-slate-500 font-bold uppercase tracking-widest text-center md:text-left">예상 관세</p><p className="text-3xl font-black text-slate-100 text-center md:text-left">₩{recommendedInfo.dutyKRW.toLocaleString(undefined, {maximumFractionDigits:0})}</p></div>
+                                        <div className="space-y-3"><p className="text-sm text-slate-500 font-bold uppercase tracking-widest text-center md:text-left">해외 배송비</p><p className="text-3xl font-black text-orange-400 text-center md:text-left">₩{recommendedInfo.intlShipping.toLocaleString()}</p></div>
+                                        <div className="space-y-3"><p className="text-sm text-slate-500 font-bold uppercase tracking-widest text-center md:text-left">통관 비용</p><p className="text-3xl font-black text-slate-100 text-center md:text-left">₩{(recommendedInfo.mpfKRW + recommendedInfo.hmfKRW).toLocaleString(undefined, {maximumFractionDigits:0})}</p></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </section>
+
+                        <section className="space-y-10">
+                            <h2 className="text-3xl font-black flex items-center gap-5 uppercase tracking-tighter px-10"><i data-lucide="truck" className="text-blue-600"></i> 배송 및 통관 다각도 비교 리포트</h2>
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-12">
+                                {comparisonData.map((carrier) => (
+                                    <div key={carrier.key} className={`relative bg-white rounded-[4rem] p-16 border-2 transition-all duration-700 ${carrier.key === recommendedInfo.key ? 'border-blue-500 shadow-3xl ring-[16px] ring-blue-50 scale-[1.03]' : 'border-gray-100'}`}>
+                                        <div className="flex justify-between items-start mb-12">
+                                            <div className="space-y-3">
+                                                <span className={`text-sm font-black uppercase tracking-widest ${carrier.color}`}>{carrier.name}</span>
+                                                <h3 className="text-6xl font-black leading-none">${carrier.priceUSD}</h3>
+                                            </div>
+                                            <div className={`${carrier.bg} ${carrier.color} p-7 rounded-[2.5rem] shadow-inner`}><i data-lucide="truck" style={{width: 40, height: 40}}></i></div>
+                                        </div>
+                                        <div className="space-y-8 border-t border-slate-50 pt-12 text-center md:text-left">
+                                            <div className="flex justify-between text-base"><span className="text-slate-400 font-bold uppercase tracking-widest">관세 및 통관세</span><span className="font-black text-slate-800">₩{(carrier.dutyKRW + carrier.mpfKRW + carrier.hmfKRW).toLocaleString(undefined, {maximumFractionDigits:0})}</span></div>
+                                            <div className="flex justify-between text-base"><span className="text-slate-400 font-bold uppercase tracking-widest">국제 물류비용</span><span className="font-black text-orange-600">₩{carrier.intlShipping.toLocaleString()}</span></div>
+                                            <div className="flex justify-between text-lg border-b border-slate-50 pb-10"><span className="text-slate-400 font-black uppercase tracking-widest">순수익</span><span className="font-black text-green-600 text-3xl">₩{carrier.profitKRW.toLocaleString()}</span></div>
+                                            <div className="min-h-[160px] bg-slate-50/80 p-8 rounded-[2.5rem] border border-slate-100 shadow-inner flex flex-col justify-center">
+                                                {carrier.comments.length > 0 ? carrier.comments.map((msg, i) => (
+                                                    <div key={i} className={`flex items-start gap-4 text-base mb-4 font-bold leading-relaxed ${msg.includes("[위험]") ? 'text-red-600' : 'text-slate-700'}`}>
+                                                        <i data-lucide="chevron-right" className="shrink-0 mt-1 text-blue-500"></i><span className="text-left">{msg}</span>
+                                                    </div>
+                                                )) : <div className="flex items-center gap-4 text-base text-blue-600 font-black"><i data-lucide="check-circle-2"></i><span>통관 및 배송 양호</span></div>}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </section>
+
+                        <section className="bg-white p-10 rounded-[3rem] border shadow-md space-y-6">
+                            <h2 className="text-2xl font-black flex items-center gap-3 text-slate-800 uppercase tracking-tighter border-b pb-4"><i data-lucide="trending-up" className="text-green-500"></i> 시장 트렌드 분석</h2>
+                            <div className="h-64 w-full">
+                                <ResponsiveContainer width="100%" height="100%">
+                                    <LineChart data={chartData}>
+                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                                        <XAxis dataKey="name" />
+                                        <YAxis />
+                                        <Tooltip />
+                                        <Line type="monotone" dataKey="value" stroke="#2563eb" strokeWidth={4} dot={{ r: 6 }} activeDot={{ r: 8 }} />
+                                    </LineChart>
+                                </ResponsiveContainer>
+                            </div>
+                        </section>
+                    </main>
+
+                    <footer className="max-w-7xl mx-auto px-10 py-20 text-center text-slate-400 border-t mt-20">
+                        <p className="text-sm font-semibold italic opacity-60 uppercase tracking-[0.5em]">eBay Sourcing Master PRO 2026 - US Customs Analysis Integrated</p>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
