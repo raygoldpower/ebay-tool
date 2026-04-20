@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>eBay Sourcing Master PRO 2026</title>
-    <!-- Dependencies: Tailwind CSS, React, Prop-Types, Recharts, Babel, Lucide -->
+    <title>이베이 마진계산기 PRO 2026</title>
+    <!-- Dependencies: Tailwind CSS, React, Recharts, Babel, Lucide -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.production.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
@@ -13,10 +13,19 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
-        body { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Noto+Sans+KR:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', 'Noto Sans KR', sans-serif; -webkit-font-smoothing: antialiased; }
         input[type=range] { accent-color: #2563eb; }
         .no-wrap { white-space: nowrap; }
+        .price-container { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.5rem; }
+        .keyword-item { transition: all 0.2s ease; cursor: pointer; border-radius: 12px; }
+        .keyword-item:hover { transform: translateX(5px); background-color: rgba(37, 99, 235, 0.05); color: #2563eb; }
+        .marketing-card { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); min-height: 220px; }
+        .marketing-card:hover { transform: translateY(-8px); border-color: #2563eb; box-shadow: 0 25px 30px -5px rgba(0, 0, 0, 0.08); }
+        .live-pulse { position: relative; display: inline-block; width: 8px; height: 8px; background-color: #10b981; border-radius: 50%; margin-right: 6px; }
+        .live-pulse::after { content: ''; position: absolute; width: 100%; height: 100%; background-color: #10b981; border-radius: 50%; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(3); opacity: 0; } }
+        .search-glow:focus-within { box-shadow: 0 0 30px rgba(37, 99, 235, 0.15); border-color: #2563eb; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900">
@@ -24,312 +33,363 @@
 
     <script type="text/babel">
         const { useState, useMemo, useEffect } = React;
-        const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = window.Recharts;
+        const { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = window.Recharts;
 
         const App = () => {
-            // --- Global States ---
+            // --- 마진 및 환경 설정 상태 ---
             const [exchangeRate, setExchangeRate] = useState(1400); 
+            const [isRateLoading, setIsRateLoading] = useState(false);
             const [manualCost, setManualCost] = useState(64000);
-            const [manualL, setManualL] = useState(30);
-            const [manualW, setManualW] = useState(20);
-            const [manualH, setManualH] = useState(15);
-            const [manualActualWeight, setManualActualWeight] = useState(0.5);
+            const [weight, setWeight] = useState(0.5);
             const [targetMargin, setTargetMargin] = useState(15);
-            const [competitorPrice, setCompetitorPrice] = useState(120); 
+            const [fedexDiscount, setFedexDiscount] = useState(70); 
             const [origin, setOrigin] = useState('KR'); 
-            const [shipMethod, setShipMethod] = useState('AIR'); 
-            const [htsSection, setHtsSection] = useState('SEC_64_67');
+            const [htsSection, setHtsSection] = useState('SEC_COS');
+            const [customDutyRate, setCustomDutyRate] = useState(25); 
+            const [isDutyVerifying, setIsDutyVerifying] = useState(false);
 
-            // --- HTS Database 2026 ---
-            const HTS_DATA = {
-                "SEC_64_67": { name: "신발/인솔", base_rate: 0.08, is_metal: false },
-                "SEC_84_85": { name: "전자/기계부품", base_rate: 0.02, is_metal: true },
-                "SEC_16_MANDU": { name: "가공식품(만두 등)", base_rate: 0.06, is_metal: false },
-                "SEC_33_COSM": { name: "화장품", base_rate: 0.03, is_metal: false },
-                "SEC_95_TOY": { name: "장난감", base_rate: 0.02, is_metal: false },
-                "SEC_90_MED": { name: "의료기기", base_rate: 0.009, is_metal: true },
-                "SEC_95_SPRT": { name: "스포츠용품", base_rate: 0.025, is_metal: false },
-                "SEC_61_62": { name: "의류(Apparel)", base_rate: 0.165, is_metal: false },
-                "SEC_94_FURN": { name: "가구", base_rate: 0.025, is_metal: false },
-                "SEC_49_BOOK": { name: "책/인쇄물", base_rate: 0.00, is_metal: false },
-                "SEC_16_21": { name: "일반 식품", base_rate: 0.06, is_metal: false },
-                "SEC_85_ELEC": { name: "가전/전자제품", base_rate: 0.05, is_metal: false },
-                "SEC_39_69": { name: "식기류", base_rate: 0.08, is_metal: false },
-                "SEC_85_PHON": { name: "핸드폰", base_rate: 0.00, is_metal: false },
-                "SEC_39_CASE": { name: "폰케이스", base_rate: 0.07, is_metal: false },
-                "SEC_39_3D": { name: "3D프린터 출력물", base_rate: 0.07, is_metal: false },
-            };
-
-            const CUSTOMS_2026 = {
-                GLOBAL_SURCHARGE: 0.10, KR_MIN_TARIFF: 0.15, MPF_RATE: 0.003464, HMF_RATE: 0.00125,
-                MPF_CONFIG: { INFORMAL: 2.69, FORMAL_MIN: 33.58, FORMAL_MAX: 651.50 }
-            };
-
-            const EBAY_CATEGORIES = {
-                GENERAL: { name: '일반 잡화', fee: 0.15 },
-                ELECTRONICS: { name: '전자제품', fee: 0.12 },
-                CLOTHING: { name: '의류/신발', fee: 0.125 },
-                COLLECTIBLES: { name: '수집품', fee: 0.13 },
-            };
-            const [selectedCat, setSelectedCat] = useState('GENERAL');
-            const PAYONEER_FEE = 0.012; 
-            const DOM_SHIPPING = 3000;
-
-            const CARRIERS = {
-                FedEx: { name: '페덱스', base: 15000, rate: 25000, divisor: 5000, color: 'text-purple-600', bg: 'bg-purple-50' },
-                Lincos: { name: '린코스', base: 12000, rate: 18000, divisor: 6000, color: 'text-blue-600', bg: 'bg-blue-50' },
-                EMS: { name: 'EMS', base: 22000, rate: 15000, divisor: null, color: 'text-red-600', bg: 'bg-red-50' }
-            };
-
-            useEffect(() => {
-                if (window.lucide) window.lucide.createIcons();
+            // --- AI 트렌드 피드 상태 ---
+            const [keyword, setKeyword] = useState('');
+            const [isSearching, setIsSearching] = useState(false);
+            const [trendData, setTrendData] = useState([
+                { name: 'Google', score: 0, color: '#4285F4' },
+                { name: 'Naver', score: 0, color: '#03C75A' },
+                { name: 'Coupang', score: 0, color: '#E52621' },
+                { name: 'eBay', score: 0, color: '#E53238' }
+            ]);
+            
+            const [aiBriefing, setAiBriefing] = useState({
+                summary: "오늘의 글로벌 데이터를 분석 중입니다...",
+                opportunity: "분석 중...", risk: "분석 중...", strategy: "분석 중...", score: 0
             });
 
-            // --- Landed Cost Calculation Engine ---
-            const comparisonData = useMemo(() => {
-                const currentEbayFee = EBAY_CATEGORIES[selectedCat].fee;
-                const section = HTS_DATA[htsSection];
+            const [recommendations, setRecommendations] = useState({
+                Google: ["분석 중..."], Naver: ["분석 중..."], Coupang: ["분석 중..."], eBay: ["분석 중..."]
+            });
+            const [marketingIdeas, setMarketingIdeas] = useState([]);
 
-                return Object.keys(CARRIERS).map(key => {
-                    const carrier = CARRIERS[key];
-                    let volWeight = 0;
-                    let chargeableWeight = manualActualWeight;
-                    let comments = [];
-                    let isCriticalError = false;
+            const apiKey = ""; // Runtime-provided
 
-                    if (carrier.divisor) {
-                        volWeight = (manualL * manualW * manualH) / carrier.divisor;
-                        chargeableWeight = Math.max(manualActualWeight, volWeight);
+            // --- 25종 세분화 HTS 데이터베이스 ---
+            const HTS_DATA = {
+                "SEC_COS": { name: "화장품/스킨케어", base_rate: 0.00 },
+                "SEC_FAS_M": { name: "의류(면직물)", base_rate: 0.165 },
+                "SEC_FAS_S": { name: "의류(합성섬유)", base_rate: 0.28 },
+                "SEC_SHO": { name: "신발/인솔", base_rate: 0.08 },
+                "SEC_BAG": { name: "핸드백/지갑", base_rate: 0.10 },
+                "SEC_JEW": { name: "패션 쥬얼리", base_rate: 0.11 },
+                "SEC_KPOP_CD": { name: "K-Pop 음반", base_rate: 0.00 },
+                "SEC_KPOP_G": { name: "K-Pop 굿즈/잡화", base_rate: 0.04 },
+                "SEC_TOY": { name: "장난감/피규어", base_rate: 0.00 },
+                "SEC_GAME": { name: "보드게임/퍼즐", base_rate: 0.00 },
+                "SEC_ELEC_P": { name: "전자부품/PCB", base_rate: 0.02 },
+                "SEC_ELEC_H": { name: "스마트 가전", base_rate: 0.05 },
+                "SEC_MOB_A": { name: "폰케이스/액세서리", base_rate: 0.07 },
+                "SEC_COM_P": { name: "컴퓨터 주변기기", base_rate: 0.00 },
+                "SEC_MED": { name: "의료기기/헬스케어", base_rate: 0.01 },
+                "SEC_FOOD_P": { name: "가공식품(라면/과자)", base_rate: 0.06 },
+                "SEC_FOOD_H": { name: "건강기능식품(홍삼 등)", base_rate: 0.01 },
+                "SEC_KIT": { name: "주방용품/식기류", base_rate: 0.08 },
+                "SEC_FUR": { name: "가구/인테리어", base_rate: 0.01 },
+                "SEC_PET": { name: "반려동물 용품", base_rate: 0.02 },
+                "SEC_SPT": { name: "스포츠/아웃도어", base_rate: 0.04 },
+                "SEC_GOLF": { name: "골프용품/클럽", base_rate: 0.00 },
+                "SEC_AUTO": { name: "자동차 부품/소모품", base_rate: 0.025 },
+                "SEC_TOOL": { name: "공구/하드웨어", base_rate: 0.03 },
+                "SEC_BOOK": { name: "도서/인쇄물", base_rate: 0.00 }
+            };
+
+            // [함수] 실시간 환율 API 호출
+            const fetchExchangeRate = async () => {
+                setIsRateLoading(true);
+                try {
+                    const res = await fetch('https://open.er-api.com/v6/latest/USD');
+                    const data = await res.json();
+                    if (data?.rates?.KRW) setExchangeRate(Math.round(data.rates.KRW * 10) / 10);
+                } catch (e) { console.error("환율 연동 실패", e); } finally { setIsRateLoading(false); }
+            };
+
+            // [함수] AI 마켓 인사이트 엔진 (실시간 검색 기반)
+            const fetchAIPulse = async (searchKeyword = "") => {
+                setIsSearching(true);
+                const isDailyMode = !searchKeyword;
+                const query = isDailyMode 
+                    ? "2026년 4월 현재 실시간 글로벌 이커머스 트렌드, 한국산 수출 인기 상품, 환율 및 관세 뉴스 요약"
+                    : `"${searchKeyword}" 키워드에 대한 글로벌 시장 분석과 소싱 전략`;
+
+                const systemPrompt = `당신은 글로벌 이커머스 데이터 분석가입니다. 실시간 뉴스 및 검색 데이터를 기반으로 정밀 보고서를 작성하세요.
+                반드시 다음 JSON 형식을 정확히 지키고, 텍스트 내 특수문자나 줄바꿈이 JSON을 깨지 않도록 하세요:
+                {
+                  "trends": [{"name": "Google", "score": 85}, {"name": "Naver", "score": 90}, {"name": "Coupang", "score": 92}, {"name": "eBay", "score": 75}],
+                  "briefing": {
+                    "summary": "뉴스 기반 요약", "opportunity": "기회 요소", "risk": "위험 요소", "strategy": "판매 전략", "score": 85
+                  },
+                  "recommendations": {
+                    "Google": ["키워드1", ... 10개], "Naver": ["키워드1", ... 10개], "Coupang": ["키워드1", ... 10개], "eBay": ["키워드1", ... 10개]
+                  },
+                  "marketing": [
+                    {"title": "제목", "content": "내용", "icon": "아이콘명"}
+                  ]
+                }`;
+
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: query }] }],
+                            systemInstruction: { parts: [{ text: systemPrompt }] },
+                            tools: [{ "google_search": {} }]
+                        })
+                    });
+                    const data = await response.json();
+                    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || "{}";
+                    const jsonMatch = text.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        let jsonStr = jsonMatch[0].replace(/[\u0000-\u001F\u007F-\u009F]/g, ""); // 제어 문자 제거
+                        const result = JSON.parse(jsonStr);
+                        setTrendData(result.trends.map(t => ({ ...t, color: t.name === 'Google' ? '#4285F4' : t.name === 'Naver' ? '#03C75A' : t.name === 'Coupang' ? '#E52621' : '#E53238' })));
+                        setAiBriefing(result.briefing);
+                        setRecommendations(result.recommendations);
+                        setMarketingIdeas(result.marketing);
                     }
+                } catch (e) { console.error("AI 로드 에러", e); } finally { setIsSearching(false); }
+            };
 
-                    if (key === 'FedEx' && manualActualWeight > 24.95) comments.push("실중량 24.95kg 초과: 추가 취급 수수료 발생");
-                    if (key === 'Lincos' && manualActualWeight > 20.0) { comments.push("린코스 중량 초과(20kg)"); isCriticalError = true; }
-                    if (key === 'EMS' && manualActualWeight > 30.0) { comments.push("EMS 중량 초과(30kg)"); isCriticalError = true; }
+            // [함수] AI 관세 실시간 검증
+            const verifyDuty = async () => {
+                setIsDutyVerifying(true);
+                const currentName = HTS_DATA[htsSection].name;
+                const systemPrompt = `2026년 미국 관세 전문가로서 "${currentName}" 품목의 최신 수입 관세를 검색하세요. JSON: {"rate": 숫자, "reason": "근거"}`;
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: `${currentName} 실시간 관세 조회.` }] }],
+                            systemInstruction: { parts: [{ text: systemPrompt }] },
+                            tools: [{ "google_search": {} }]
+                        })
+                    });
+                    const data = await response.json();
+                    const result = JSON.parse(data.candidates[0].content.parts[0].text.match(/\{.*\}/s)[0]);
+                    setCustomDutyRate((result.rate || 0) + 10); // 기본 보편관세 10% 가산
+                } catch (e) { console.error(e); } finally { setIsDutyVerifying(false); }
+            };
 
-                    const intlShipping = carrier.base + (chargeableWeight * carrier.rate);
-                    const totalOutflowKRW = manualCost + DOM_SHIPPING + intlShipping;
+            // 초기 실행
+            useEffect(() => {
+                fetchExchangeRate();
+                fetchAIPulse();
+            }, []);
 
-                    let appliedDutyRate = origin === "KR" ? Math.max(section.base_rate, CUSTOMS_2026.KR_MIN_TARIFF) : section.base_rate;
-                    let finalDutyRate = appliedDutyRate + CUSTOMS_2026.GLOBAL_SURCHARGE;
-                    if (origin === "CN") finalDutyRate += 0.25;
+            // 관세 기본 로직
+            useEffect(() => {
+                const section = HTS_DATA[htsSection] || HTS_DATA["SEC_COS"];
+                let rate = origin === "KR" ? Math.max(section.base_rate, 0.15) : section.base_rate;
+                rate += 0.10;
+                if (origin === "CN") rate += 0.25;
+                setCustomDutyRate(Number((rate * 100).toFixed(1)));
+            }, [htsSection, origin]);
 
-                    const mpfInformalUSD = CUSTOMS_2026.MPF_CONFIG.INFORMAL;
-                    const mpfInformalKRW = mpfInformalUSD * exchangeRate;
-                    const denominator = (1 - currentEbayFee - PAYONEER_FEE - (targetMargin / 100) - finalDutyRate);
-                    
-                    let priceUSD = 0;
-                    let dutyKRW = 0;
-                    let mpfKRW = mpfInformalKRW;
-                    let hmfKRW = 0;
-                    let requiredRevKRW = 0;
+            // 마진 계산 엔진
+            const calculations = useMemo(() => {
+                const emsBase = weight <= 0.5 ? 32500 : weight <= 1.0 ? 42000 : 61000;
+                const fedexBase = (weight <= 0.5 ? 145500 : 160800) * (1 - fedexDiscount / 100);
+                const lincosBase = weight * 18000 + 10000; 
 
-                    if (denominator > 0) {
-                        requiredRevKRW = (totalOutflowKRW + mpfInformalKRW) / denominator;
-                        priceUSD = requiredRevKRW / exchangeRate;
-                        if (priceUSD >= 2500) {
-                            const formalMPFKRW = Math.max(
-                                Math.min(requiredRevKRW * CUSTOMS_2026.MPF_RATE, CUSTOMS_2026.MPF_CONFIG.FORMAL_MAX * exchangeRate),
-                                CUSTOMS_2026.MPF_CONFIG.FORMAL_MIN * exchangeRate
-                            );
-                            mpfKRW = formalMPFKRW;
-                            requiredRevKRW = (totalOutflowKRW + mpfKRW) / denominator;
-                            priceUSD = requiredRevKRW / exchangeRate;
-                        }
-                        dutyKRW = requiredRevKRW * finalDutyRate;
-                        if (shipMethod === "SEA") hmfKRW = requiredRevKRW * CUSTOMS_2026.HMF_RATE;
-                    }
-
-                    if (origin === "KR") comments.push("[2026 개정] 한국산 제품 관세 하한선 15% 적용");
-                    if (priceUSD > 800) comments.push("[위험] 미국 관세 한도($800) 초과: 통관 위험");
-
-                    return {
-                        key, ...carrier, chargeableWeight: chargeableWeight.toFixed(2), volWeight: volWeight.toFixed(2),
-                        intlShipping, priceUSD: priceUSD > 0 ? priceUSD.toFixed(2) : "산출불가",
-                        profitKRW: Math.floor(requiredRevKRW * (targetMargin / 100)),
-                        dutyKRW, mpfKRW, hmfKRW, finalDutyRate: (finalDutyRate * 100).toFixed(1),
-                        entryType: priceUSD < 2500 ? "약식" : "정식",
-                        comments, isCriticalError
+                const generatePrices = (shipKRW) => {
+                    const baseCost = manualCost + 3000;
+                    const mpfKRW = 2.69 * exchangeRate;
+                    const calc = (incShip, incDuty) => {
+                        const numerator = baseCost + (incShip ? shipKRW : 0) + (incDuty ? mpfKRW : 0) + (0.3 * exchangeRate);
+                        const denominator = 1 - 0.177 - (targetMargin / 100) - (incDuty ? customDutyRate/100 : 0);
+                        return denominator > 0 ? (numerator / denominator / exchangeRate).toFixed(2) : "0.00";
                     };
-                });
-            }, [manualL, manualW, manualH, manualActualWeight, manualCost, targetMargin, exchangeRate, selectedCat, origin, shipMethod, htsSection]);
+                    return { full: calc(true, true), noDuty: calc(true, false), noShip: calc(false, true), pure: calc(false, false) };
+                };
+                return {
+                    EMS: { name: "EMS", ship: emsBase, prices: generatePrices(emsBase), color: 'text-red-600', bg: 'bg-red-50' },
+                    FedEx: { name: "FedEx", ship: fedexBase, prices: generatePrices(fedexBase), color: 'text-purple-600', bg: 'bg-purple-50' },
+                    Lincos: { name: "Lincos", ship: lincosBase, prices: generatePrices(lincosBase), color: 'text-blue-600', bg: 'bg-blue-50' },
+                };
+            }, [manualCost, weight, targetMargin, fedexDiscount, exchangeRate, customDutyRate]);
 
-            const validData = comparisonData.filter(d => !d.isCriticalError && d.priceUSD !== "산출불가");
-            const recommendedInfo = validData.length > 0 
-                ? validData.reduce((prev, curr) => parseFloat(prev.priceUSD) < parseFloat(curr.priceUSD) ? prev : curr)
-                : comparisonData[0];
+            const getDynamicFontSize = (p) => p.length <= 6 ? "text-4xl md:text-5xl" : p.length <= 8 ? "text-3xl md:text-4xl" : "text-2xl md:text-3xl";
+            const bestKey = Object.keys(calculations).reduce((a, b) => parseFloat(calculations[a].prices.full) < parseFloat(calculations[b].prices.full) ? a : b);
+            const best = calculations[bestKey];
 
-            const competitivenessScore = useMemo(() => {
-                if (!competitorPrice || isNaN(recommendedInfo.priceUSD)) return 0;
-                const diff = ((competitorPrice - parseFloat(recommendedInfo.priceUSD)) / competitorPrice) * 100;
-                return Math.min(Math.max(Math.floor(50 + diff * 2.5), 0), 100);
-            }, [competitorPrice, recommendedInfo]);
+            useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
 
             return (
-                <div className="min-h-screen pb-20">
-                    {/* Header */}
-                    <header className="bg-white border-b sticky top-0 z-40 px-6 py-5 flex justify-between items-center shadow-sm">
-                        <div className="flex items-center gap-2">
-                            <div className="p-2 bg-blue-600 rounded-lg text-white shadow-lg flex items-center justify-center">
-                                <i data-lucide="package" style={{width: 24, height: 24}}></i>
-                            </div>
-                            <h1 className="text-xl md:text-2xl font-black tracking-tighter text-slate-800 uppercase">eBay Master <span className="text-blue-600">2026</span></h1>
+                <div className="min-h-screen bg-slate-50 pb-20">
+                    <header className="bg-slate-900 text-white p-6 flex justify-between items-center sticky top-0 z-50 shadow-xl">
+                        <div className="flex items-center gap-3">
+                            <div className="bg-blue-600 p-2.5 rounded-xl shadow-lg"><i data-lucide="calculator" size={24}></i></div>
+                            <h1 className="text-2xl font-black uppercase tracking-tighter">이베이 <span className="text-blue-400">마진계산기 PRO</span></h1>
                         </div>
-                        <div className="text-xs font-bold text-slate-600 bg-slate-100 px-4 py-2 rounded-xl border">
-                            환율: <span className="text-blue-600 font-black">₩{exchangeRate.toLocaleString()}</span>
+                        <div className="flex gap-4">
+                            <div className="bg-white/10 px-4 py-2 rounded-xl text-xs font-black uppercase text-blue-300 flex items-center gap-2">
+                                <span className="live-pulse"></span> 2026.04 LIVE FEED
+                            </div>
                         </div>
                     </header>
 
-                    <main className="max-w-7xl mx-auto p-4 md:p-6 space-y-8">
-                        <section className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
-                            {/* Input Panel */}
-                            <div className="lg:col-span-5 bg-white p-6 md:p-8 rounded-[2.5rem] border shadow-md space-y-8">
-                                <h2 className="text-lg font-bold flex items-center gap-2 text-slate-700 border-b pb-4 uppercase">
-                                    <i data-lucide="calculator" className="text-blue-500"></i> 소싱 정밀 입력
-                                </h2>
-                                <div className="grid grid-cols-4 gap-3">
-                                    {[['가로', manualL, setManualL], ['세로', manualW, setManualW], ['높이', manualH, setManualH], ['무게', manualActualWeight, setManualActualWeight]].map(([label, val, set]) => (
-                                        <div key={label} className="space-y-1 text-center">
-                                            <p className="text-[11px] font-black text-slate-400 uppercase">{label}</p>
-                                            <input type="number" value={val} onChange={(e) => set(Number(e.target.value))} className="w-full bg-slate-50 border-none rounded-xl p-3 text-center font-bold text-base outline-none shadow-inner focus:ring-2 focus:ring-blue-200 transition-all"/>
-                                        </div>
-                                    ))}
+                    <main className="max-w-7xl mx-auto p-4 md:p-8 space-y-10">
+                        
+                        {/* 1. 메인 검색 센터 */}
+                        <section className="bg-white p-8 md:p-12 rounded-[3.5rem] shadow-2xl border-4 border-blue-600/10">
+                            <div className="max-w-4xl mx-auto text-center space-y-8">
+                                <div className="space-y-2">
+                                    <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase">AI 글로벌 마켓 리서치</h2>
+                                    <p className="text-slate-400 font-bold">궁금한 아이템을 검색하면 AI가 실시간 뉴스를 바탕으로 정밀 분석합니다.</p>
                                 </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="bg-slate-50 p-4 rounded-[1.5rem] shadow-inner border border-slate-100">
-                                        <p className="text-[11px] font-black text-slate-400 mb-2 uppercase flex items-center gap-1"><i data-lucide="globe" size={12}/> 원산지</p>
-                                        <select value={origin} onChange={(e) => setOrigin(e.target.value)} className="bg-transparent text-lg font-black w-full outline-none text-blue-600 cursor-pointer">
-                                            <option value="KR">한국산</option><option value="CN">중국산</option><option value="OTHER">제3국산</option>
-                                        </select>
-                                    </div>
-                                    <div className="bg-slate-50 p-4 rounded-[1.5rem] shadow-inner border border-slate-100">
-                                        <p className="text-[11px] font-black text-slate-400 mb-2 uppercase flex items-center gap-1"><i data-lucide="truck" size={12}/> 매입가</p>
-                                        <input type="number" value={manualCost} onChange={(e) => setManualCost(Number(e.target.value))} className="bg-transparent text-lg font-black w-full outline-none text-green-600"/>
-                                    </div>
-                                </div>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1">
-                                        <p className="text-[11px] font-black text-slate-400 uppercase ml-1">HTS 품목</p>
-                                        <select value={htsSection} onChange={(e) => setHtsSection(e.target.value)} className="w-full bg-slate-100 border-none rounded-xl p-3 text-sm font-bold outline-none cursor-pointer focus:ring-2 focus:ring-blue-500">
-                                            {Object.keys(HTS_DATA).map(k => (
-                                                <option key={k} value={k}>{HTS_DATA[k].name}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                    <div className="space-y-1">
-                                        <p className="text-[11px] font-black text-slate-400 uppercase ml-1">경쟁사 가격($)</p>
-                                        <input type="number" value={competitorPrice} onChange={(e) => setCompetitorPrice(Number(e.target.value))} className="w-full bg-slate-100 border-none rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-blue-500 shadow-inner"/>
-                                    </div>
-                                </div>
-                                <div className="pt-4 px-1">
-                                    <p className="text-sm font-bold text-slate-600 mb-4 uppercase">마진 설정: <span className="text-blue-600">{targetMargin}%</span></p>
-                                    <input type="range" min="5" max="40" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg cursor-pointer accent-blue-600 transition-all"/>
+                                <div className="relative group bg-slate-50 rounded-full border-2 border-slate-200 p-2 flex items-center shadow-sm focus-within:ring-4 focus-within:ring-blue-100 transition-all">
+                                    <div className="pl-6 text-slate-400"><i data-lucide="search" size={24}></i></div>
+                                    <input type="text" placeholder="분석 키워드 입력..." className="bg-transparent flex-1 px-6 py-4 text-xl font-bold outline-none text-slate-800" value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && fetchAIPulse(keyword)}/>
+                                    <button onClick={() => fetchAIPulse(keyword)} disabled={isSearching} className="bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-full font-black text-lg shadow-lg disabled:opacity-50 transition-all flex items-center gap-3">
+                                        {isSearching ? <i data-lucide="refresh-cw" className="animate-spin"></i> : <i data-lucide="zap"></i>} {isSearching ? "분석 중..." : "분석 시작"}
+                                    </button>
                                 </div>
                             </div>
+                        </section>
 
-                            {/* Main Strategy Report (Price text size and layout fixed) */}
-                            <div className="lg:col-span-7 bg-slate-900 rounded-[3rem] p-8 md:p-10 text-white relative overflow-hidden flex flex-col justify-between shadow-xl">
-                                <div className="absolute top-0 right-0 p-12 opacity-5 pointer-events-none rotate-12"><i data-lucide="shield-check" style={{width: 200, height: 200}}></i></div>
-                                
+                        {/* 2. 마진 계산 설정 & 리스팅 가격 */}
+                        <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
+                            <div className="lg:col-span-5 bg-white p-8 rounded-[3rem] shadow-lg space-y-6 border border-slate-200">
+                                <h2 className="text-xl font-black flex items-center gap-3 text-slate-800 uppercase border-b pb-4"><i data-lucide="sliders" className="text-blue-500"></i> 마진 & 실시간 설정</h2>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="space-y-2"><p className="text-xs font-black text-slate-400 uppercase">상세 품목(25종)</p>
+                                        <select value={htsSection} onChange={(e) => setHtsSection(e.target.value)} className="w-full bg-slate-50 border rounded-2xl p-4 font-bold outline-none text-sm">
+                                            {Object.keys(HTS_DATA).map(k => <option key={k} value={k}>{HTS_DATA[k].name}</option>)}
+                                        </select>
+                                    </div>
+                                    <div className="space-y-2"><p className="text-xs font-black text-slate-400 uppercase">원산지</p>
+                                        <select value={origin} onChange={(e) => setOrigin(e.target.value)} className="w-full bg-slate-50 border rounded-2xl p-4 font-bold outline-none"><option value="KR">한국 (KR)</option><option value="CN">중국 (CN)</option></select>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div className="bg-slate-50 p-4 rounded-3xl border text-center shadow-inner"><p className="text-xs font-black text-slate-400 uppercase mb-1">구매원가</p><input type="number" value={manualCost} onChange={(e) => setManualCost(Number(e.target.value))} className="bg-transparent text-xl font-black w-full text-green-600 text-center outline-none"/></div>
+                                    <div className="bg-slate-50 p-4 rounded-3xl border text-center shadow-inner"><p className="text-xs font-black text-slate-400 uppercase mb-1">무게(kg)</p><input type="number" step="0.1" value={weight} onChange={(e) => setWeight(Number(e.target.value))} className="bg-transparent text-xl font-black w-full text-blue-600 text-center outline-none"/></div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4 bg-blue-50/50 p-6 rounded-[2.5rem] border border-blue-100">
+                                    <div className="text-center relative"><p className="text-xs font-black text-blue-400 uppercase mb-2 flex items-center justify-center gap-1"><span className="live-pulse"></span> 실시간 환율</p><input type="number" value={exchangeRate} onChange={(e) => setExchangeRate(Number(e.target.value))} className="bg-transparent text-xl font-black w-full text-slate-800 text-center outline-none"/></div>
+                                    <div className="text-center"><p className="text-xs font-black text-blue-400 uppercase mb-2">적용 관세율 (%)</p><input type="number" step="0.1" value={customDutyRate} onChange={(e) => setCustomDutyRate(Number(e.target.value))} className="bg-transparent text-xl font-black w-full text-slate-800 text-center outline-none"/></div>
+                                </div>
+                                <div className="pt-2"><input type="range" min="5" max="40" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg cursor-pointer accent-blue-600"/><p className="text-center text-xs font-bold text-slate-400 mt-2">목표 마진율: {targetMargin}%</p></div>
+                            </div>
+
+                            <div className="lg:col-span-7 bg-slate-900 rounded-[4rem] p-10 text-white relative shadow-2xl overflow-hidden flex flex-col justify-between transition-all hover:scale-[1.01]">
+                                <div className="absolute top-0 right-0 p-10 opacity-5"><i data-lucide="zap" size={260}></i></div>
                                 <div className="relative z-10 space-y-10">
-                                    <div className="flex flex-col md:flex-row justify-between items-center md:items-start gap-4">
-                                        <div className="space-y-1">
-                                            <h3 className="text-blue-400 font-black flex items-center gap-2 uppercase tracking-widest text-sm">
-                                                <i data-lucide="zap" size={16}></i> 2026 관세 적용 소싱 전략
-                                            </h3>
-                                            <p className="text-slate-500 text-sm font-medium italic">추천 배송사: {recommendedInfo.name} ({recommendedInfo.entryType})</p>
-                                        </div>
-                                        <div className="bg-blue-500/20 text-blue-400 px-4 py-2 rounded-xl border border-blue-500/30 font-black text-xs uppercase flex items-center">
-                                            관세율 {recommendedInfo.finalDutyRate}% 반영
-                                        </div>
-                                    </div>
-
-                                    {/* Responsive Price and Competitiveness Panel */}
-                                    <div className="grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-                                        <div className="md:col-span-7 space-y-6 text-center md:text-left pr-4">
-                                            <p className="text-slate-400 text-xs font-black uppercase tracking-[0.2em]">권장 리스팅 가격</p>
-                                            <div className="flex items-baseline justify-center md:justify-start gap-3 leading-tight">
-                                                {/* Price size adjusted from text-9xl to text-6xl/7xl to prevent overlap */}
-                                                <span className="text-6xl md:text-7xl font-black text-white tracking-tighter no-wrap">${recommendedInfo.priceUSD}</span>
-                                                <span className="text-blue-400 font-black text-xl md:text-2xl">USD</span>
+                                    <div className="flex justify-between items-center border-b border-white/10 pb-6"><h3 className="text-blue-400 font-black uppercase text-base flex items-center gap-2"><i data-lucide="zap"></i> 권장 리스팅 가격표</h3><span className="text-xs bg-blue-500/20 px-3 py-1 rounded-full text-blue-300 font-black uppercase">Live Integrated</span></div>
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {[
+                                            { label: "무료 배송 + 관세 포함", price: best.prices.full, color: "blue", icon: "check-circle" },
+                                            { label: "무료 배송 + 관세 미포함", price: best.prices.noDuty, color: "green", icon: "user-check" },
+                                            { label: "유료 배송 + 관세 포함", price: best.prices.noShip, color: "orange", icon: "truck" },
+                                            { label: "순수 상품가 (수익 최저선)", price: best.prices.pure, color: "slate", icon: "shopping-bag" }
+                                        ].map((item, idx) => (
+                                            <div key={idx} className="bg-white/5 p-6 rounded-[2.5rem] border border-white/10 shadow-xl hover:bg-white/10 transition-all flex flex-col justify-between">
+                                                <p className={`text-${item.color}-400 text-[11px] font-black uppercase tracking-widest mb-4 flex items-center gap-2`}><i data-lucide={item.icon} size={14}/> {item.label}</p>
+                                                <div className="price-container">
+                                                    <span className={`${getDynamicFontSize(item.price)} font-black text-white leading-none`}>${item.price.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",")}</span>
+                                                    <span className="text-slate-500 font-black text-sm uppercase">USD</span>
+                                                </div>
                                             </div>
-                                            <div className="flex items-center gap-3 text-slate-300 text-sm font-bold bg-white/5 p-4 rounded-2xl border border-white/5 w-fit mx-auto md:mx-0 shadow-inner">
-                                                <i data-lucide="check-circle-2" className="text-green-500" size={16}></i>
-                                                <span>정산 예상: ₩{(parseFloat(recommendedInfo.priceUSD) * exchangeRate).toLocaleString(undefined, {maximumFractionDigits:0})}</span>
-                                            </div>
-                                        </div>
-
-                                        <div className="md:col-span-5 bg-white/5 p-6 md:p-8 rounded-[2.5rem] border border-white/10 flex flex-col justify-between backdrop-blur-xl shadow-2xl">
-                                            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-3 text-center md:text-left">경쟁력 지수</p>
-                                            <div className="flex items-end justify-center md:justify-start gap-3">
-                                                <span className={`text-6xl font-black ${competitivenessScore > 70 ? 'text-green-400' : competitivenessScore > 40 ? 'text-yellow-400' : 'text-red-400'}`}>{competitivenessScore}</span>
-                                                <span className="text-slate-500 font-bold text-sm mb-2">PTS</span>
-                                            </div>
-                                            <div className="mt-6 h-3 bg-white/10 rounded-full overflow-hidden">
-                                                <div className={`h-full transition-all duration-1000 ${competitivenessScore > 70 ? 'bg-green-500' : competitivenessScore > 40 ? 'bg-yellow-500' : 'bg-red-500'}`} style={{ width: `${competitivenessScore}%` }}></div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6 pt-10 border-t border-white/10">
-                                        <div className="space-y-2"><p className="text-[10px] text-slate-500 font-bold uppercase">순수익액</p><p className="text-xl font-black text-green-400">₩{recommendedInfo.profitKRW.toLocaleString()}</p></div>
-                                        <div className="space-y-2"><p className="text-[10px] text-slate-500 font-bold uppercase">예상 관세</p><p className="text-xl font-black text-slate-100">₩{recommendedInfo.dutyKRW.toLocaleString(undefined, {maximumFractionDigits:0})}</p></div>
-                                        <div className="space-y-2"><p className="text-[10px] text-slate-500 font-bold uppercase">해외 배송비</p><p className="text-xl font-black text-orange-400">₩{recommendedInfo.intlShipping.toLocaleString()}</p></div>
-                                        <div className="space-y-2"><p className="text-[10px] text-slate-500 font-bold uppercase">통관 부가세</p><p className="text-xl font-black text-slate-100">₩{(recommendedInfo.mpfKRW + recommendedInfo.hmfKRW).toLocaleString(undefined, {maximumFractionDigits:0})}</p></div>
+                                        ))}
                                     </div>
                                 </div>
                             </div>
                         </section>
 
-                        <section className="space-y-6">
-                            <h2 className="text-xl font-black flex items-center gap-3 uppercase tracking-tighter px-4 border-l-4 border-blue-600 ml-2">
-                                <i data-lucide="truck" className="text-blue-600"></i> 배송사별 정밀 비교 리포트
-                            </h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {comparisonData.map((carrier) => (
-                                    <div key={carrier.key} className={`relative bg-white rounded-[2.5rem] p-8 md:p-10 border-2 transition-all duration-500 ${carrier.key === recommendedInfo.key ? 'border-blue-500 shadow-2xl ring-8 ring-blue-50' : 'border-gray-100 opacity-90'}`}>
-                                        <div className="flex justify-between items-start mb-10">
-                                            <div className="space-y-1">
-                                                <span className={`text-[10px] font-black uppercase tracking-widest ${carrier.color}`}>{carrier.name}</span>
-                                                <h3 className="text-4xl font-black leading-none">${carrier.priceUSD}</h3>
+                        {/* 3. 물류 상세 분석 */}
+                        <section className="space-y-8">
+                            <h2 className="text-3xl font-black flex items-center gap-5 uppercase tracking-tighter px-10 border-l-8 border-blue-600 ml-2"><i data-lucide="bar-chart-3" className="text-blue-600"></i> 물류 및 관세 상세 분석</h2>
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
+                                {Object.keys(calculations).map(key => {
+                                    const c = calculations[key];
+                                    const isBest = key === bestKey;
+                                    return (
+                                        <div key={key} className={`relative bg-white rounded-[4rem] p-12 border-2 transition-all duration-700 ${isBest ? 'border-blue-500 shadow-2xl ring-[16px] ring-blue-50 scale-[1.03] z-10' : 'border-gray-100 opacity-90'}`}>
+                                            <div className="flex justify-between items-start mb-10 text-center md:text-left">
+                                                <div className="space-y-3"><span className={`text-sm font-black uppercase tracking-[0.25em] ${c.color}`}>{c.name} 기반</span><h3 className="text-4xl font-black text-slate-800">₩{c.ship.toLocaleString()}</h3></div>
+                                                <div className={`${c.bg} ${c.color} p-6 rounded-[2rem] shadow-inner shrink-0`}><i data-lucide="package" size={32}/></div>
                                             </div>
-                                            <div className={`${carrier.bg} ${carrier.color} p-4 rounded-2xl shadow-inner`}><i data-lucide="truck" size={24}></i></div>
-                                        </div>
-                                        <div className="space-y-6 border-t border-slate-50 pt-8 text-sm">
-                                            <div className="flex justify-between font-medium"><span className="text-slate-400 uppercase text-[11px]">관세 및 제비용</span><span className="font-bold text-slate-800">₩{(carrier.dutyKRW + carrier.mpfKRW + carrier.hmfKRW).toLocaleString(undefined, {maximumFractionDigits:0})}</span></div>
-                                            <div className="flex justify-between font-medium"><span className="text-slate-400 uppercase text-[11px]">국제 항공 운송비</span><span className="font-bold text-orange-600">₩{carrier.intlShipping.toLocaleString()}</span></div>
-                                            <div className="flex justify-between text-base border-b border-slate-50 pb-6"><span className="text-slate-400 font-black uppercase text-xs">확보 순익</span><span className="font-black text-green-600 text-2xl">₩{carrier.profitKRW.toLocaleString()}</span></div>
-                                            <div className="min-h-[120px] bg-slate-50/80 p-6 rounded-2xl border shadow-inner flex flex-col justify-center">
-                                                {carrier.comments.length > 0 ? carrier.comments.map((msg, i) => (
-                                                    <div key={i} className={`flex items-start gap-3 text-xs mb-3 font-bold leading-relaxed ${msg.includes("[위험]") ? 'text-red-600' : 'text-slate-700'}`}>
-                                                        <i data-lucide="chevron-right" className="shrink-0 mt-1 text-blue-500" size={14}></i><span className="text-left">{msg}</span>
-                                                    </div>
-                                                )) : <div className="flex items-center gap-3 text-xs text-blue-600 font-black"><i data-lucide="check-circle-2" size={16}></i><span>모든 규격 및 통관 양호</span></div>}
+                                            <div className="space-y-6 border-t pt-10 text-sm font-bold">
+                                                <div className="flex justify-between font-black"><span className="text-slate-400 uppercase">예상 순이익</span><span className="text-green-600 text-xl">₩{Math.floor((manualCost * targetMargin) / 100).toLocaleString()}</span></div>
+                                                <div className="flex justify-between"><span className="text-slate-400 uppercase">리스팅가</span><span className="text-slate-800 text-xl">${c.prices.full}</span></div>
                                             </div>
                                         </div>
+                                    );
+                                })}
+                            </div>
+                        </section>
+
+                        {/* 4. 인기 트렌드 리스트 */}
+                        <section className="space-y-8">
+                            <h2 className="text-3xl font-black flex items-center gap-5 uppercase tracking-tighter px-10 border-l-8 border-indigo-600 ml-2"><i data-lucide="lightbulb" className="text-indigo-600"></i> 오늘의 실시간 인기 상품 트렌드</h2>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+                                {Object.keys(recommendations).map(platform => (
+                                    <div key={platform} className="bg-white p-8 rounded-[3rem] shadow-lg border border-slate-100 hover:border-indigo-300 transition-all">
+                                        <div className="flex items-center gap-3 mb-6 border-b pb-4">
+                                            <div className={`p-2.5 rounded-xl ${platform === 'Google' ? 'bg-blue-50 text-blue-600' : platform === 'Naver' ? 'bg-green-50 text-green-600' : platform === 'Coupang' ? 'bg-red-50 text-red-600' : 'bg-rose-50 text-rose-600'}`}><i data-lucide={platform === 'Google' ? 'globe' : platform === 'Naver' ? 'search' : platform === 'Coupang' ? 'shopping-cart' : 'shopping-bag'} size={20}></i></div>
+                                            <h3 className="font-black text-lg uppercase tracking-wider">{platform}</h3>
+                                        </div>
+                                        <ul className="space-y-2">
+                                            {(recommendations[platform] || []).slice(0, 10).map((item, idx) => (
+                                                <li key={idx} className="flex items-center gap-3 text-sm font-bold text-slate-600 keyword-item p-2" onClick={() => { setKeyword(item); window.scrollTo({top: 100, behavior: 'smooth'}); }}><span className="text-xs text-slate-300 w-4 font-black">{idx + 1}</span>{item}</li>
+                                            ))}
+                                        </ul>
                                     </div>
                                 ))}
                             </div>
                         </section>
 
-                        <section className="bg-white p-10 rounded-[3rem] border shadow-md space-y-6">
-                            <h2 className="text-2xl font-black flex items-center gap-3 text-slate-800 uppercase tracking-tighter border-b pb-4"><i data-lucide="trending-up" className="text-green-500"></i> 미국 시장 실시간 트렌드 분석</h2>
-                            <div className="h-64 w-full">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <LineChart data={[ {name: '1월', v: 400}, {name: '2월', v: 300}, {name: '3월', v: 600}, {name: '4월', v: 800}, {name: '5월', v: 750}, {name: '현재', v: 950} ]}>
-                                        <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                                        <XAxis dataKey="name" stroke="#94a3b8" />
-                                        <YAxis hide />
-                                        <Tooltip contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)'}} />
-                                        <Line type="monotone" dataKey="v" stroke="#2563eb" strokeWidth={6} dot={{ r: 8, fill: '#2563eb', strokeWidth: 0 }} activeDot={{ r: 10 }} />
-                                    </LineChart>
-                                </ResponsiveContainer>
+                        {/* 5. 실시간 소싱 & 마케팅 아이디어 */}
+                        <section className="space-y-8">
+                            <h2 className="text-3xl font-black flex items-center gap-5 uppercase tracking-tighter px-10 border-l-8 border-blue-600 ml-2"><i data-lucide="zap" className="text-blue-600"></i> 오늘의 실시간 소싱 & 마케팅 아이디어</h2>
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                                {marketingIdeas.length > 0 ? marketingIdeas.map((idea, idx) => (
+                                    <div key={idx} className="bg-white p-10 rounded-[3.5rem] shadow-xl border-2 border-slate-50 marketing-card flex flex-col">
+                                        <div className="bg-slate-50 w-16 h-16 rounded-[1.5rem] flex items-center justify-center mb-8 mx-auto md:mx-0 text-blue-600 shadow-inner"><i data-lucide={idea.icon || "zap"} size={32}></i></div>
+                                        <h4 className="text-xl font-black mb-4 text-slate-800 underline decoration-blue-500 decoration-4 underline-offset-8">{idea.title}</h4>
+                                        <p className="text-base font-bold text-slate-500 leading-relaxed flex-1">{idea.content}</p>
+                                    </div>
+                                )) : <div className="col-span-3 text-center py-20 text-slate-400 italic">오늘의 뉴스를 분석하고 있습니다...</div>}
+                            </div>
+                        </section>
+
+                        {/* 6. [최하단] AI 마켓 브리핑 */}
+                        <section className="bg-white p-10 rounded-[4rem] shadow-xl border border-blue-100 relative overflow-hidden animate-in fade-in duration-1000">
+                            <div className="absolute top-0 right-0 p-12 opacity-5"><i data-lucide="brain" size={150}></i></div>
+                            <div className="relative z-10 space-y-10">
+                                <div className="flex justify-between items-center border-b border-slate-100 pb-6">
+                                    <h2 className="text-2xl font-black uppercase text-slate-800 tracking-tighter flex items-center gap-3"><i data-lucide="brain" className="text-purple-600"></i> AI 글로벌 마켓 전략 리포트 (Today)</h2>
+                                    <div className="flex items-center gap-4">
+                                        <div className="text-right hidden md:block"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Market Score</p><p className="text-2xl font-black text-blue-600">{aiBriefing.score || 0}%</p></div>
+                                        <div className="w-14 h-14 rounded-full border-4 border-blue-100 border-t-blue-600 flex items-center justify-center font-black text-blue-600 text-lg">{aiBriefing.score || 0}</div>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-start">
+                                    <div className="lg:col-span-5 h-64 border-r border-slate-50 pr-8">
+                                        <p className="text-xs font-black text-slate-400 uppercase mb-6 tracking-widest text-center md:text-left">플랫폼별 실시간 수요 지수</p>
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={trendData}><XAxis dataKey="name" axisLine={false} tickLine={false} fontWeight="bold"/><YAxis hide domain={[0, 100]}/><Tooltip cursor={{fill: 'transparent'}}/><Bar dataKey="score" radius={[10, 10, 0, 0]} barSize={40}>{trendData.map((entry, index) => <Cell key={index} fill={entry.color}/>)}</Bar></BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+                                    <div className="lg:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div className="md:col-span-2 bg-indigo-600 p-6 rounded-3xl text-white shadow-lg"><h4 className="text-xs font-black opacity-60 mb-2 uppercase">데일리 뉴스 요약</h4><p className="text-lg font-black italic">"{aiBriefing.summary}"</p></div>
+                                        <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100 shadow-inner"><h4 className="text-xs font-black text-blue-400 uppercase mb-3 flex items-center gap-2"><i data-lucide="sparkles" size={14}/> 오늘의 기회</h4><p className="text-sm font-bold text-blue-800">{aiBriefing.opportunity}</p></div>
+                                        <div className="bg-rose-50 p-6 rounded-3xl border border-rose-100 shadow-inner"><h4 className="text-xs font-black text-rose-400 uppercase mb-3 flex items-center gap-2"><i data-lucide="shield-alert" size={14}/> 리스크 주의보</h4><p className="text-sm font-bold text-rose-800">{aiBriefing.risk}</p></div>
+                                        <div className="md:col-span-2 bg-slate-900 p-6 rounded-3xl text-blue-400 border border-slate-800 shadow-xl"><h4 className="text-xs font-black opacity-60 uppercase mb-3 flex items-center gap-2"><i data-lucide="target" size={14}/> AI 권장 전략</h4><p className="text-sm font-bold">{aiBriefing.strategy}</p></div>
+                                    </div>
+                                </div>
                             </div>
                         </section>
                     </main>
 
-                    <footer className="max-w-7xl mx-auto px-10 py-16 text-center text-slate-400 border-t mt-16">
-                        <p className="text-[11px] font-semibold italic opacity-60 uppercase tracking-[0.4em]">eBay Sourcing Master PRO 2026 - Optimized Dashboard v2.1</p>
-                    </footer>
+                    <footer className="max-w-7xl mx-auto px-10 py-20 text-center text-slate-400 border-t mt-20 font-bold uppercase tracking-[0.5em] text-sm opacity-40">이베이 마진계산기 PRO 2026 - Daily AI Intelligence Integration v10.0</footer>
                 </div>
             );
         };
