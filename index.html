@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>이베이 마진계산기 PRO 2026</title>
     <!-- Dependencies: Tailwind CSS, React, Recharts, Babel, Lucide -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -16,7 +16,6 @@
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Noto+Sans+KR:wght@400;700;900&display=swap');
         body { font-family: 'Inter', 'Noto Sans KR', sans-serif; -webkit-font-smoothing: antialiased; }
         input[type=range] { accent-color: #2563eb; }
-        .no-wrap { white-space: nowrap; }
         .price-container { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.3rem; }
         .keyword-item { transition: all 0.2s ease; cursor: pointer; border-radius: 12px; }
         .keyword-item:hover { transform: translateX(5px); background-color: rgba(37, 99, 235, 0.05); color: #2563eb; }
@@ -24,8 +23,9 @@
         .live-pulse::after { content: ''; position: absolute; width: 100%; height: 100%; background-color: #10b981; border-radius: 50%; animation: pulse 2s infinite; }
         @keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(3); opacity: 0; } }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
+        input:focus { border-color: #2563eb; ring: 2px #2563eb; outline: none; }
+        select:focus { border-color: #2563eb; outline: none; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900">
@@ -36,7 +36,7 @@
         const { BarChart, Bar, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } = window.Recharts;
 
         const App = () => {
-            // --- 1. 상태 관리 ---
+            // --- 1. 기본 환경 설정 ---
             const [exchangeRate, setExchangeRate] = useState(1400); 
             const [manualCost, setManualCost] = useState(64000);
             const [manualL, setManualL] = useState(30);
@@ -49,15 +49,24 @@
             const [htsSection, setHtsSection] = useState('SEC_COS');
             const [customDutyRate, setCustomDutyRate] = useState(25); 
 
-            // --- 2. AI 데이터 상태 ---
+            // --- 2. [신규] 사후 정산용 상태 (Actual Invoice) ---
+            const [actualShipInvoiced, setActualShipInvoiced] = useState(0); 
+            const [actualSurcharge, setActualSurcharge] = useState(0); 
+
+            // --- 3. 수수료 설정 (대표님 요청: 넉넉하게) ---
+            const EBAY_FVF_BASE = 16.5; // 기본 수수료
+            const INTL_SELLER_FEE = 1.5; // 국제 셀러 수수료 (추가)
+            const PAYONEER_FEE = 1.5; // 페이오니아 수수료 (상향)
+            const TOTAL_FEE_RATE = (EBAY_FVF_BASE + INTL_SELLER_FEE + PAYONEER_FEE) / 100; // 약 19.5%
+
+            // --- 4. AI & 데이터 상태 ---
             const [keyword, setKeyword] = useState('');
             const [isSearching, setIsSearching] = useState(false);
             const [recommendations, setRecommendations] = useState(null);
             const [ebayTop5, setEbayTop5] = useState([]);
 
-            const apiKey = ""; 
+            const apiKey = ""; // Runtime-provided
 
-            // --- 3. 데이터베이스 ---
             const HTS_DATA = {
                 "SEC_COS": { name: "화장품/스킨케어", base_rate: 0.00 },
                 "SEC_FAS_M": { name: "의류(면직물)", base_rate: 0.165 },
@@ -70,8 +79,7 @@
                 "SEC_ELEC_H": { name: "스마트 가전", base_rate: 0.05 },
                 "SEC_MED": { name: "의료기기/헬스케어", base_rate: 0.01 },
                 "SEC_FOOD_P": { name: "가공식품(라면/과자)", base_rate: 0.06 },
-                "SEC_PET": { name: "반려동물 용품", base_rate: 0.02 },
-                "SEC_AUTO": { name: "자동차 부품/소모품", base_rate: 0.025 }
+                "SEC_AUTO": { name: "자동차 부품", base_rate: 0.025 }
             };
 
             const CARRIER_CONFIG = {
@@ -80,7 +88,6 @@
                 EMS: { name: 'EMS (Post)', base: 22000, rate: 15000, divisor: null, color: 'text-red-600', bg: 'bg-red-50' }
             };
 
-            // --- 4. 데이터 로직 ---
             const fetchInitialData = useCallback(async () => {
                 try {
                     const res = await fetch('https://open.er-api.com/v6/latest/USD');
@@ -91,14 +98,14 @@
 
             const fetchAIPulse = async (inputStr = "") => {
                 setIsSearching(true);
-                const queryText = inputStr ? `"${inputStr}" 분석` : "2026년 이베이 판매율 TOP 5 및 플랫폼별 트렌드 요약";
+                const queryText = inputStr ? `"${inputStr}" 이커머스 분석` : "2026년 이베이 실시간 인기 품목 5개와 마켓 트렌드";
                 try {
                     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             contents: [{ parts: [{ text: queryText }] }],
-                            systemInstruction: { parts: [{ text: "JSON 형식 응답. recommendations(Object with Arrays), ebayTop5(Array of {rank, name, growth, reason}) 포함." }] },
+                            systemInstruction: { parts: [{ text: "JSON 형식으로만 응답하세요. { recommendations: {Google: [], Naver: [], Coupang: [], eBay: []}, ebayTop5: [{name, reason, growth}] }" }] },
                             tools: [{ "google_search": {} }]
                         })
                     });
@@ -110,7 +117,7 @@
                         setRecommendations(result.recommendations);
                         setEbayTop5(result.ebayTop5 || []);
                     }
-                } catch (e) { console.error("AI 로딩 에러", e); } finally { setIsSearching(false); }
+                } catch (e) { console.error(e); } finally { setIsSearching(false); }
             };
 
             useEffect(() => { fetchInitialData(); fetchAIPulse(); }, [fetchInitialData]);
@@ -123,165 +130,141 @@
                 setCustomDutyRate(Number((rate * 100).toFixed(1)));
             }, [htsSection, origin]);
 
-            // --- 5. 통합 마진 및 물류 상세 계산 엔진 ---
+            // --- 5. 통합 계산 로직 (넉넉한 수수료 반영) ---
             const calculations = useMemo(() => {
                 const carrierResults = Object.keys(CARRIER_CONFIG).map(key => {
                     const carrier = CARRIER_CONFIG[key];
-                    // 부피무게 계산
                     let volWeight = carrier.divisor ? (manualL * manualW * manualH) / carrier.divisor : 0;
-                    // 청구무게 확정
                     let chargeableWeight = Math.max(weight, volWeight);
-                    // 운임 계산
-                    let shipCost = carrier.base + (chargeableWeight * carrier.rate);
-                    if (key === 'FedEx') shipCost = shipCost * (1 - fedexDiscount/100);
+                    let shipCostKRW = carrier.base + (chargeableWeight * carrier.rate);
+                    if (key === 'FedEx') shipCostKRW = shipCostKRW * (1 - fedexDiscount/100);
 
                     const baseCost = manualCost + 3000;
                     const mpfKRW = 2.69 * exchangeRate;
-                    const feeRate = 0.165 + 0.012;
 
-                    const calcScenario = (isDDP, customMargin = null) => {
-                        const m = customMargin !== null ? customMargin : targetMargin;
+                    const calcScenario = (isDDP, margin) => {
                         const dutyRate = isDDP ? customDutyRate / 100 : 0;
-                        const numerator = baseCost + shipCost + mpfKRW + (0.3 * exchangeRate);
-                        const denominator = 1 - feeRate - (m / 100) - dutyRate;
+                        const numerator = baseCost + shipCostKRW + mpfKRW + (0.3 * exchangeRate);
+                        const denominator = 1 - TOTAL_FEE_RATE - (margin / 100) - dutyRate;
                         if (denominator <= 0) return { price: "0.00", margin: 0 };
                         return { 
                             price: (numerator / denominator / exchangeRate).toFixed(2), 
-                            margin: Math.floor((numerator / denominator) * (m / 100)) 
+                            margin: Math.floor((numerator / denominator) * (margin / 100)) 
                         };
                     };
 
-                    return { 
-                        key, 
-                        name: carrier.name, 
-                        shipCost, 
-                        volWeight, 
-                        chargeableWeight, 
-                        ddp: calcScenario(true), 
-                        ddu: calcScenario(false), 
-                        color: carrier.color, 
-                        bg: carrier.bg 
-                    };
+                    return { key, name: carrier.name, shipCostKRW, volWeight, chargeableWeight, ddp: calcScenario(true, targetMargin), ddu: calcScenario(false, targetMargin), color: carrier.color, bg: carrier.bg };
                 });
 
-                // 가장 저렴한 리스팅가(DDP 기준) 제공사 선정
                 const best = carrierResults.reduce((prev, curr) => parseFloat(prev.ddp.price) < parseFloat(curr.ddp.price) ? prev : curr);
 
                 const strategies = [
-                    { label: "프리미엄 리스팅 (Premium DDP)", margin: targetMargin + 10, isDDP: true, desc: "브랜드 가치 확보 (관세 포함)", color: "purple" },
-                    { label: "표준 판매자 부담 (Standard DDP)", margin: targetMargin, isDDP: true, desc: "목표 수익 충족 (관세 포함)", color: "blue" },
-                    { label: "표준 구매자 부담 (Standard DDU)", margin: targetMargin, isDDP: false, desc: "목표 수익 충족 (관세 미포함)", color: "green" },
-                    { label: "손익분기점 (Break-even)", margin: 0, isDDP: false, desc: "마진 0%, 절대 마지노선", color: "slate" }
+                    { label: "프리미엄 DDP (Premium)", margin: targetMargin + 10, isDDP: true, desc: "브랜드 리스팅가 (관세포함)", color: "purple" },
+                    { label: "표준 DDP (Standard)", margin: targetMargin, isDDP: true, desc: "추천 판매가 (관세포함)", color: "blue" },
+                    { label: "표준 DDU (Standard)", margin: targetMargin, isDDP: false, desc: "저가 노출가 (관세미포함)", color: "green" },
+                    { label: "손익분기점 (Safe Zero)", margin: 0, isDDP: false, desc: "절대 마지노선 (No Margin)", color: "slate" }
                 ].map(s => {
-                    const feeRate = 0.165 + 0.012;
                     const dutyRate = s.isDDP ? customDutyRate / 100 : 0;
-                    const numerator = (manualCost + 3000) + best.shipCost + (2.69 * exchangeRate) + (0.3 * exchangeRate);
-                    const denominator = 1 - feeRate - (s.margin / 100) - dutyRate;
-                    return { 
-                        ...s, 
-                        data: { 
-                            price: denominator > 0 ? (numerator / denominator / exchangeRate).toFixed(2) : "0.00", 
-                            margin: denominator > 0 ? Math.floor((numerator / denominator) * (s.margin / 100)) : 0 
-                        } 
-                    };
+                    const numerator = (manualCost + 3000) + best.shipCostKRW + (2.69 * exchangeRate) + (0.3 * exchangeRate);
+                    const denominator = 1 - TOTAL_FEE_RATE - (s.margin / 100) - dutyRate;
+                    return { ...s, data: { price: denominator > 0 ? (numerator / denominator / exchangeRate).toFixed(2) : "0.00", margin: denominator > 0 ? Math.floor((numerator / denominator) * (s.margin / 100)) : 0 } };
                 });
 
                 return { all: carrierResults, best, strategies };
-            }, [manualCost, manualL, manualW, manualH, weight, targetMargin, fedexDiscount, exchangeRate, customDutyRate]);
+            }, [manualCost, manualL, manualW, manualH, weight, targetMargin, fedexDiscount, exchangeRate, customDutyRate, TOTAL_FEE_RATE]);
 
+            const getDynamicFontSize = (p) => p.length <= 6 ? "text-4xl" : "text-2xl";
             useEffect(() => { if (window.lucide) window.lucide.createIcons(); });
 
             return (
                 <div className="min-h-screen bg-slate-50 pb-20 text-slate-900 text-sm md:text-base">
-                    <header className="bg-slate-900 text-white p-6 flex justify-between items-center sticky top-0 z-50 shadow-xl">
+                    <header className="bg-slate-900 text-white p-5 flex justify-between items-center sticky top-0 z-50 shadow-xl">
                         <div className="flex items-center gap-3">
-                            <div className="bg-blue-600 p-2 rounded-lg shadow-lg"><i data-lucide="calculator" size={24}></i></div>
-                            <h1 className="text-2xl font-black uppercase tracking-tighter italic">eBay <span className="text-blue-400">PRO 2026</span></h1>
+                            <div className="bg-blue-600 p-2 rounded-lg"><i data-lucide="calculator" size={20}></i></div>
+                            <h1 className="text-xl font-black uppercase tracking-tighter italic">eBay PRO <span className="text-blue-400">2026</span></h1>
                         </div>
-                        <div className="bg-white/10 px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2">
-                            <span className="live-pulse"></span> SYSTEM LIVE
+                        <div className="bg-white/10 px-3 py-1.5 rounded-lg text-[10px] font-black uppercase flex items-center gap-2">
+                            <span className="live-pulse"></span> 19.5% Fee Guard Active
                         </div>
                     </header>
 
                     <main className="max-w-7xl mx-auto p-4 md:p-8 space-y-12">
                         
                         {/* 1. 검색 섹션 */}
-                        <section className="bg-white p-8 md:p-12 rounded-[3.5rem] shadow-2xl border-4 border-blue-600/10">
-                            <div className="max-w-4xl mx-auto text-center space-y-6">
-                                <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase">AI 글로벌 마켓 리서치</h2>
-                                <div className="relative group bg-slate-50 rounded-full border-2 border-slate-200 p-2 flex items-center shadow-sm focus-within:ring-4 focus-within:ring-blue-100 transition-all">
-                                    <div className="pl-6 text-slate-400"><i data-lucide="search" size={24}></i></div>
-                                    <input type="text" placeholder="분석할 키워드나 상품 링크를 입력하세요..." className="bg-transparent flex-1 px-6 py-4 text-xl font-bold outline-none text-slate-800" value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && fetchAIPulse(keyword)}/>
-                                    <button onClick={() => fetchAIPulse(keyword)} disabled={isSearching} className="bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-full font-black text-lg shadow-lg flex items-center gap-3 transition-all">
-                                        {isSearching ? <i data-lucide="refresh-cw" className="animate-spin"></i> : <i data-lucide="zap"></i>} 분석 시작
-                                    </button>
+                        <section className="bg-white p-6 md:p-12 rounded-[2.5rem] shadow-2xl border-4 border-blue-600/10">
+                            <div className="max-w-4xl mx-auto text-center space-y-4">
+                                <h2 className="text-2xl font-black text-slate-800 tracking-tighter uppercase">AI 글로벌 마켓 리서치</h2>
+                                <div className="relative group bg-slate-50 rounded-full border border-slate-200 p-1 flex items-center focus-within:ring-2 focus-within:ring-blue-400 transition-all">
+                                    <div className="pl-5 text-slate-400"><i data-lucide="search" size={20}></i></div>
+                                    <input type="text" placeholder="키워드/URL 입력 후 엔터..." className="bg-transparent flex-1 px-4 py-3 text-base font-bold outline-none" value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && fetchAIPulse(keyword)}/>
+                                    <button onClick={() => fetchAIPulse(keyword)} className="bg-blue-600 text-white px-6 py-3 rounded-full font-black text-sm shadow-lg">분석</button>
                                 </div>
                             </div>
                         </section>
 
-                        {/* 2. 대시보드 (설정 & 추천 가격) */}
+                        {/* 2. 대시보드 (수정됨) */}
                         <section className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">
-                            <div className="lg:col-span-5 bg-white p-10 rounded-[3rem] shadow-lg space-y-8 border border-slate-200">
-                                <h2 className="text-xl font-black flex items-center gap-3 text-slate-800 uppercase border-b pb-4"><i data-lucide="sliders" className="text-blue-500"></i> 마진 & 화물 설정</h2>
+                            <div className="lg:col-span-5 bg-white p-8 rounded-[2.5rem] shadow-lg space-y-6 border border-slate-200">
+                                <h2 className="text-lg font-black flex items-center gap-3 text-slate-800 uppercase border-b pb-4"><i data-lucide="sliders" className="text-blue-500"></i> 마진 & 화물 규격 설정</h2>
                                 
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div className="space-y-1"><p className="text-[10px] font-black text-slate-400 uppercase">품목 카테고리</p>
-                                        <select value={htsSection} onChange={(e) => setHtsSection(e.target.value)} className="w-full bg-slate-50 border rounded-2xl p-4 font-bold outline-none text-xs">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div className="space-y-1"><p className="text-[9px] font-black text-slate-400 uppercase">품목 카테고리</p>
+                                        <select value={htsSection} onChange={(e) => setHtsSection(e.target.value)} className="w-full bg-slate-50 border rounded-xl p-3 font-bold text-xs">
                                             {Object.keys(HTS_DATA).map(k => <option key={k} value={k}>{HTS_DATA[k].name}</option>)}
                                         </select>
                                     </div>
-                                    <div className="space-y-1"><p className="text-[10px] font-black text-slate-400 uppercase">원산지</p>
-                                        <select value={origin} onChange={(e) => setOrigin(e.target.value)} className="w-full bg-slate-50 border rounded-2xl p-4 font-bold outline-none text-sm"><option value="KR">한국 (KR)</option><option value="CN">중국 (CN)</option></select>
+                                    <div className="space-y-1"><p className="text-[9px] font-black text-slate-400 uppercase">원산지</p>
+                                        <select value={origin} onChange={(e) => setOrigin(e.target.value)} className="w-full bg-slate-50 border rounded-xl p-3 font-bold text-xs"><option value="KR">한국 (KR)</option><option value="CN">중국 (CN)</option></select>
                                     </div>
                                 </div>
 
-                                {/* 화물 규격 입력창 */}
                                 <div className="grid grid-cols-4 gap-2">
-                                    {[ ['L(cm)', manualL, setManualL], ['W(cm)', manualW, setManualW], ['H(cm)', manualH, setManualH], ['Kg', weight, setWeight] ].map(([label, val, set]) => (
-                                        <div key={label} className="bg-slate-50 p-3 rounded-2xl border text-center shadow-inner">
-                                            <p className="text-[9px] font-black text-slate-400 mb-1 uppercase">{label}</p>
-                                            <input type="number" value={val} onChange={(e) => set(Number(e.target.value))} className="bg-transparent text-sm font-black w-full text-center outline-none"/>
+                                    {[ ['L', manualL, setManualL], ['W', manualW, setManualW], ['H', manualH, setManualH], ['Kg', weight, setWeight] ].map(([label, val, set]) => (
+                                        <div key={label} className="bg-slate-50 p-2 rounded-xl border text-center">
+                                            <p className="text-[9px] font-black text-slate-400 mb-1">{label}</p>
+                                            <input type="number" inputmode="decimal" value={val} onChange={(e) => set(Number(e.target.value))} className="bg-transparent text-sm font-black w-full text-center outline-none"/>
                                         </div>
                                     ))}
                                 </div>
 
-                                <div className="bg-slate-50 p-6 rounded-3xl border text-center shadow-inner">
-                                    <p className="text-xs font-black text-slate-400 uppercase mb-2">국내 구매원가 (Purchase Cost)</p>
-                                    <input type="number" value={manualCost} onChange={(e) => setManualCost(Number(e.target.value))} className="bg-transparent text-3xl font-black w-full text-green-600 text-center outline-none"/>
+                                <div className="bg-slate-50 p-5 rounded-2xl border text-center shadow-inner">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">국내 구매원가 (₩)</p>
+                                    <input type="number" inputmode="numeric" value={manualCost} onChange={(e) => setManualCost(Number(e.target.value))} className="bg-transparent text-2xl font-black w-full text-green-600 text-center outline-none"/>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-4 bg-blue-50/50 p-6 rounded-[2.5rem] border border-blue-100 text-center">
-                                    <div><p className="text-[10px] font-black text-blue-400 uppercase mb-1">실시간 환율</p><p className="text-xl font-black">₩{exchangeRate}</p></div>
-                                    <div><p className="text-[10px] font-black text-blue-400 uppercase mb-1">관세율 (%)</p><p className="text-xl font-black">{customDutyRate}%</p></div>
+                                <div className="grid grid-cols-2 gap-4 bg-blue-50/50 p-5 rounded-3xl border border-blue-100 text-center">
+                                    <div><p className="text-[9px] font-black text-blue-400 uppercase">환율</p><p className="text-base font-black">₩{exchangeRate}</p></div>
+                                    <div><p className="text-[9px] font-black text-blue-400 uppercase">수입관세</p><p className="text-base font-black">{customDutyRate}%</p></div>
                                 </div>
 
                                 <div className="pt-2">
-                                    <div className="flex justify-between items-center mb-3 px-1"><p className="text-xs font-black text-slate-500 uppercase tracking-widest">목표 마진율</p><span className="text-xl font-black text-blue-600">{targetMargin}%</span></div>
-                                    <input type="range" min="5" max="40" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="w-full h-3 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"/>
+                                    <div className="flex justify-between items-center mb-2 px-1"><p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">목표 마진율</p><span className="text-base font-black text-blue-600">{targetMargin}%</span></div>
+                                    <input type="range" min="5" max="40" value={targetMargin} onChange={(e) => setTargetMargin(Number(e.target.value))} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"/>
                                 </div>
                             </div>
 
-                            {/* 리스팅 전략 가격표 */}
-                            <div className="lg:col-span-7 bg-slate-900 rounded-[4rem] p-10 text-white relative shadow-2xl overflow-hidden flex flex-col justify-between">
+                            <div className="lg:col-span-7 bg-slate-900 rounded-[3rem] p-8 md:p-12 text-white relative shadow-2xl overflow-hidden flex flex-col justify-between">
                                 <div className="absolute top-0 right-0 p-10 opacity-5 pointer-events-none rotate-12"><i data-lucide="zap" size={260}></i></div>
-                                <div className="relative z-10 space-y-10">
-                                    <div className="flex justify-between items-center border-b border-white/10 pb-6">
-                                        <h3 className="text-blue-400 font-black uppercase text-base flex items-center gap-2"><i data-lucide="trending-up"></i> 추천 배송사 기반 전략 가격표</h3>
-                                        <span className="text-[10px] bg-blue-500/20 px-4 py-2 rounded-full text-blue-300 font-black uppercase tracking-widest italic">{calculations.best.name} 적용</span>
+                                <div className="relative z-10 space-y-8">
+                                    <div className="flex justify-between items-center border-b border-white/10 pb-5">
+                                        <h3 className="text-blue-400 font-black uppercase text-sm flex items-center gap-2"><i data-lucide="trending-up"></i> 전략별 리스팅 권장 가격</h3>
+                                        <div className="text-right">
+                                            <p className="text-[8px] font-black text-slate-500 uppercase">Fees Included: 19.5%</p>
+                                        </div>
                                     </div>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 h-[440px] overflow-y-auto pr-2 custom-scrollbar">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-[400px] overflow-y-auto pr-1 custom-scrollbar">
                                         {calculations.strategies.map((item, idx) => (
-                                            <div key={idx} className="bg-white/5 p-8 rounded-[2.5rem] border border-white/10 shadow-xl hover:bg-white/10 transition-all flex flex-col justify-between group">
+                                            <div key={idx} className="bg-white/5 p-6 rounded-[2rem] border border-white/10 shadow-lg hover:bg-white/10 transition-all flex flex-col justify-between group">
                                                 <div>
-                                                    <p className={`text-${item.color}-400 text-[10px] font-black uppercase tracking-widest mb-4 flex items-center gap-2`}><i data-lucide="tag" size={14}/> {item.label}</p>
-                                                    <div className="price-container mb-3">
-                                                        <span className="text-5xl font-black text-white leading-none tracking-tighter">${item.data.price}</span>
-                                                        <span className="text-slate-500 font-black text-sm uppercase shrink-0">USD</span>
+                                                    <p className={`text-${item.color}-400 text-[9px] font-black uppercase mb-3 flex items-center gap-2`}><i data-lucide="tag" size={10}/> {item.label}</p>
+                                                    <div className="price-container mb-2">
+                                                        <span className={`${getDynamicFontSize(item.data.price)} font-black text-white tracking-tighter`}>${item.data.price}</span>
+                                                        <span className="text-slate-500 font-black text-[10px] uppercase">USD</span>
                                                     </div>
                                                 </div>
-                                                <div className="pt-6 border-t border-white/10 flex justify-between items-end">
-                                                    <div><p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">예상 실현 순수익</p><p className={`text-xl font-black text-${item.color}-400`}>₩{item.data.margin.toLocaleString()}</p></div>
-                                                    <p className="text-[9px] text-slate-600 font-bold italic text-right leading-tight max-w-[120px]">{item.desc}</p>
+                                                <div className="pt-4 border-t border-white/10 flex justify-between items-end">
+                                                    <div><p className="text-[8px] font-black text-slate-500 uppercase">예상 실현 순수익</p><p className={`text-lg font-black text-${item.color}-400`}>₩{item.data.margin.toLocaleString()}</p></div>
+                                                    <p className="text-[8px] text-slate-600 font-bold italic text-right max-w-[100px]">{item.desc}</p>
                                                 </div>
                                             </div>
                                         ))}
@@ -290,136 +273,145 @@
                             </div>
                         </section>
 
-                        {/* [요청하신 추가 기능] 3. 물류 사이즈 및 부피무게 상세 정보표 */}
-                        <section className="bg-white p-10 rounded-[3.5rem] shadow-xl border border-slate-200">
-                             <div className="flex justify-between items-center mb-8 border-b pb-6">
-                                 <h3 className="text-xl font-black uppercase flex items-center gap-3 text-slate-800"><i data-lucide="layout" className="text-blue-600"></i> 물류 사이즈 및 부피무게 상세 정보표 (Logistics Metrics)</h3>
-                                 <div className="flex gap-2">
-                                     <span className="text-[10px] font-black bg-blue-50 text-blue-600 px-3 py-1 rounded-full uppercase">Input: {manualL}x{manualW}x{manualH} cm</span>
-                                     <span className="text-[10px] font-black bg-green-50 text-green-600 px-3 py-1 rounded-full uppercase">Actual: {weight} kg</span>
+                        {/* 3. [신규] 사후 인보이스 분석 섹션 */}
+                        <section className="bg-white p-8 md:p-12 rounded-[3rem] shadow-xl border border-blue-100 grid grid-cols-1 lg:grid-cols-2 gap-12">
+                             <div className="space-y-6">
+                                 <h3 className="text-xl font-black uppercase flex items-center gap-3 text-slate-800"><i data-lucide="receipt" className="text-blue-600"></i> 사후 비용 정산 (Actual Post-Shipment)</h3>
+                                 <p className="text-sm text-slate-500 font-bold leading-relaxed">배송 후 날라온 인보이스의 실제 금액을 입력해 보세요. 예상 마진과 실제 마진의 오차를 분석해 드립니다.</p>
+                                 <div className="grid grid-cols-2 gap-4">
+                                     <div className="space-y-2">
+                                         <label className="text-[10px] font-black text-slate-400 uppercase">실청구 배송비 (₩)</label>
+                                         <input type="number" value={actualShipInvoiced} onChange={(e) => setActualShipInvoiced(Number(e.target.value))} className="w-full bg-slate-50 border p-4 rounded-2xl font-black text-blue-600 text-lg outline-none" placeholder="0"/>
+                                     </div>
+                                     <div className="space-y-2">
+                                         <label className="text-[10px] font-black text-slate-400 uppercase">추가 할증료/할인 (₩)</label>
+                                         <input type="number" value={actualSurcharge} onChange={(e) => setActualSurcharge(Number(e.target.value))} className="w-full bg-slate-50 border p-4 rounded-2xl font-black text-rose-500 text-lg outline-none" placeholder="0"/>
+                                     </div>
                                  </div>
                              </div>
-                             <div className="overflow-x-auto">
-                                 <table className="w-full text-left border-collapse">
+                             <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white flex flex-col justify-center gap-6 relative overflow-hidden">
+                                 <div className="absolute -right-5 bottom-0 opacity-10 rotate-12"><i data-lucide="trending-down" size={150}></i></div>
+                                 <div className="flex justify-between items-center border-b border-white/10 pb-4">
+                                     <span className="text-xs font-black uppercase text-blue-400 tracking-widest">Real Profit Analysis</span>
+                                     <span className="text-[9px] font-bold text-slate-500 italic">Invoiced Data Applied</span>
+                                 </div>
+                                 <div className="flex justify-between items-center">
+                                     <p className="text-sm font-bold text-slate-400">예상 순이익 (Standard)</p>
+                                     <p className="text-xl font-black">₩{calculations.best.ddp.margin.toLocaleString()}</p>
+                                 </div>
+                                 <div className="flex justify-between items-center">
+                                     <p className="text-sm font-bold text-slate-400 italic">비용 오차 (Gap)</p>
+                                     <p className={`text-xl font-black ${ (calculations.best.shipCostKRW - (actualShipInvoiced + actualSurcharge)) >= 0 ? 'text-green-400' : 'text-rose-500' }`}>
+                                         {actualShipInvoiced > 0 ? `₩${Math.floor(calculations.best.shipCostKRW - (actualShipInvoiced + actualSurcharge)).toLocaleString()}` : "데이터 대기"}
+                                     </p>
+                                 </div>
+                                 <div className="flex justify-between items-center pt-6 border-t border-white/20">
+                                     <p className="text-base font-black uppercase text-blue-400">최종 실현 수익</p>
+                                     <p className="text-3xl font-black">₩{actualShipInvoiced > 0 ? (calculations.best.ddp.margin + Math.floor(calculations.best.shipCostKRW - (actualShipInvoiced + actualSurcharge))).toLocaleString() : "0"}</p>
+                                 </div>
+                             </div>
+                        </section>
+
+                        {/* 4. 물류 규격 상세표 (L/W/H 분석) */}
+                        <section className="bg-white p-8 md:p-12 rounded-[3rem] shadow-xl border border-slate-200">
+                             <div className="flex justify-between items-center mb-8 border-b pb-6">
+                                 <h3 className="text-lg font-black uppercase flex items-center gap-3 text-slate-800"><i data-lucide="layout" className="text-blue-600"></i> 물류 사이즈 및 부피무게 분석</h3>
+                             </div>
+                             <div className="overflow-x-auto custom-scrollbar">
+                                 <table className="w-full text-left border-collapse min-w-[600px]">
                                      <thead>
-                                         <tr className="border-b-2 border-slate-50">
-                                             <th className="py-4 px-6 text-[10px] font-black text-slate-400 uppercase tracking-widest">운송사 (Carrier)</th>
-                                             <th className="py-4 px-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">공식 (Divisor)</th>
-                                             <th className="py-4 px-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">부피무게 (Vol. Wt)</th>
-                                             <th className="py-4 px-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">실중량 (Act. Wt)</th>
-                                             <th className="py-4 px-6 text-[10px] font-black text-slate-400 uppercase tracking-widest text-right">청구 무게 (Chargeable)</th>
+                                         <tr className="border-b text-[9px] font-black text-slate-400 uppercase tracking-widest">
+                                             <th className="py-4">Carrier</th>
+                                             <th className="py-4 text-center">Divisor</th>
+                                             <th className="py-4 text-center">Vol. Weight</th>
+                                             <th className="py-4 text-center">Act. Weight</th>
+                                             <th className="py-4 text-right">Chargeable</th>
                                          </tr>
                                      </thead>
                                      <tbody>
                                          {calculations.all.map((c) => (
-                                             <tr key={c.key} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group">
-                                                 <td className={`py-5 px-6 font-black ${c.color}`}>{c.name}</td>
-                                                 <td className="py-5 px-6 text-center font-bold text-slate-500">{CARRIER_CONFIG[c.key].divisor || "N/A"}</td>
-                                                 <td className="py-5 px-6 text-center font-black text-slate-700">{c.volWeight.toFixed(2)} kg</td>
-                                                 <td className="py-5 px-6 text-center font-black text-slate-700">{weight} kg</td>
-                                                 <td className="py-5 px-6 text-right">
-                                                     <div className="flex flex-col items-end">
-                                                         <span className="font-black text-blue-600 text-lg">{c.chargeableWeight.toFixed(2)} kg</span>
-                                                         <span className="text-[9px] font-bold text-slate-400 uppercase">Max Value Applied</span>
-                                                     </div>
-                                                 </td>
+                                             <tr key={c.key} className="border-b border-slate-50 group hover:bg-slate-50 transition-colors">
+                                                 <td className={`py-5 font-black ${c.color}`}>{c.name}</td>
+                                                 <td className="py-5 text-center font-bold text-slate-500">{CARRIER_CONFIG[c.key].divisor || "N/A"}</td>
+                                                 <td className="py-5 text-center font-black text-slate-700">{c.volWeight.toFixed(2)} kg</td>
+                                                 <td className="py-5 text-center font-black text-slate-700">{weight} kg</td>
+                                                 <td className="py-5 text-right font-black text-blue-600 text-lg">{c.chargeableWeight.toFixed(2)} kg</td>
                                              </tr>
                                          ))}
                                      </tbody>
                                  </table>
                              </div>
-                             <p className="mt-6 text-[10px] text-slate-400 font-bold italic">* 부피무게 공식: (가로 x 세로 x 높이) / Divisor. 실중량과 부피무게 중 높은 쪽으로 운임이 결정됩니다.</p>
                         </section>
 
-                        {/* 4. 배송사 상세 비교 (상세 리포트) */}
+                        {/* 5. 배송사 실시간 비교 리포트 (USD 동시 표기) */}
                         <section className="space-y-10">
-                            <div className="flex justify-between items-end px-10">
-                                <h2 className="text-3xl font-black flex items-center gap-5 uppercase tracking-tighter"><i data-lucide="truck" className="text-blue-600" /> 물류사별 실시간 비교 리포트</h2>
-                                <p className="text-xs text-slate-400 font-bold uppercase tracking-widest italic">Live Comparison Feed</p>
-                            </div>
-                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            <h2 className="text-2xl font-black flex items-center gap-4 uppercase tracking-tighter px-5 md:px-10"><i data-lucide="truck" className="text-blue-600" /> 물류사별 실시간 비교</h2>
+                            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                                 {calculations.all.map((c) => (
-                                    <div key={c.key} className={`relative bg-white rounded-[3.5rem] p-12 border-2 transition-all duration-500 ${c.key === calculations.best.key ? 'border-blue-500 shadow-3xl ring-[12px] ring-blue-50 scale-[1.03] z-10' : 'border-gray-100 opacity-90'}`}>
-                                        {c.key === calculations.best.key && <div className="absolute -top-6 left-12 bg-blue-600 text-white px-6 py-2 rounded-xl text-xs font-black uppercase shadow-lg tracking-widest italic">Best Shipping</div>}
-                                        <div className="flex justify-between items-start mb-8">
+                                    <div key={c.key} className={`relative bg-white rounded-[2.5rem] p-10 border-2 transition-all duration-500 ${c.key === calculations.best.key ? 'border-blue-600 shadow-2xl ring-8 ring-blue-50 scale-[1.02]' : 'border-gray-100 opacity-90'}`}>
+                                        <div className="flex justify-between items-start mb-6">
                                             <div>
-                                                <span className={`text-[10px] font-black uppercase tracking-widest ${c.color}`}>{c.name} 운임</span>
-                                                <h3 className="text-4xl font-black text-slate-800 mt-1">₩{c.shipCost.toLocaleString()}</h3>
+                                                <span className={`text-[9px] font-black uppercase ${c.color}`}>{c.name}</span>
+                                                <h3 className="text-3xl font-black text-slate-800 mt-1">₩{c.shipCostKRW.toLocaleString()}</h3>
+                                                <p className="text-[11px] font-black text-slate-400 italic">USD ${ (c.shipCostKRW / exchangeRate).toFixed(2) }</p>
                                             </div>
-                                            <div className={`${c.bg} ${c.color} p-5 rounded-[1.5rem] shadow-inner shrink-0`}><i data-lucide="ship" size={28}/></div>
+                                            <div className={`${c.bg} ${c.color} p-4 rounded-xl shadow-inner`}><i data-lucide="ship" size={20}/></div>
                                         </div>
-                                        <div className="space-y-5 border-t pt-8 text-sm font-bold">
-                                            <div className="flex justify-between"><span className="text-slate-400 uppercase tracking-tighter">DDP 리스팅가</span><span className="text-slate-800 text-lg">${c.ddp.price}</span></div>
-                                            <div className="flex justify-between border-b pb-5"><span className="text-slate-400 uppercase tracking-tighter">예상 순이익</span><span className="text-green-600 text-lg">₩{c.ddp.margin.toLocaleString()}</span></div>
-                                            <div className="p-4 bg-slate-50 rounded-2xl text-[10px] text-slate-500 italic leading-relaxed">
-                                                {c.key === 'FedEx' ? "5000 부피무게 공식 적용. 빠른 통관과 신뢰도가 높음." : c.key === 'EMS' ? "실중량 위주 과금. 대형 화물은 수취 거절 가능성 유의." : "6000 부피무게 공식 적용. 가격 경쟁력이 우수함."}
-                                            </div>
+                                        <div className="space-y-4 border-t pt-6 text-xs font-bold">
+                                            <div className="flex justify-between"><span className="text-slate-400 uppercase">리스팅가(DDP)</span><span className="text-slate-800 text-base">${c.ddp.price}</span></div>
+                                            <div className="flex justify-between"><span className="text-slate-400 uppercase">예상 순수익</span><span className="text-green-600 text-base">₩{c.ddp.margin.toLocaleString()}</span></div>
                                         </div>
                                     </div>
                                 ))}
                             </div>
                         </section>
 
-                        {/* 5. 용어 정리 및 가이드 */}
-                        <section className="bg-white p-10 rounded-[3.5rem] shadow-xl border border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-10">
-                             <div className="space-y-4">
-                                 <div className="flex items-center gap-2 text-blue-600 font-black uppercase text-xs border-l-4 border-blue-600 pl-3 tracking-widest text-[10px]">DDP & DDU TERMS</div>
-                                 <p className="text-[11px] leading-relaxed font-bold text-slate-600"><strong className="text-slate-900 font-black">DDP (Delivered Duty Paid):</strong> 판매자가 수입 관세를 선결제. 고객이 물건 받을 때 추가 비용이 없어 재구매율이 압도적입니다.<br/><br/><strong className="text-slate-900 font-black">DDU (Delivered Duty Unpaid):</strong> 구매자가 관세를 직접 납부. 노출 가격은 낮아지지만 구매자 저항이 발생할 수 있습니다.</p>
+                        {/* 6. 용어 정리 가이드 */}
+                        <section className="bg-white p-8 rounded-[2.5rem] shadow-xl border border-slate-200 grid grid-cols-1 md:grid-cols-3 gap-8">
+                             <div className="space-y-3">
+                                 <div className="flex items-center gap-2 text-blue-600 font-black uppercase text-[10px] border-l-4 border-blue-600 pl-3">Fee Structure</div>
+                                 <p className="text-[11px] leading-relaxed font-bold text-slate-600">
+                                     <strong className="text-slate-900">19.5% 통합 수수료:</strong> eBay 기본 16.5% + 국제 셀러 1.5% + 정산 수수료 1.5%가 모두 공제된 넉넉하고 안전한 마진입니다.
+                                 </p>
                              </div>
-                             <div className="space-y-4">
-                                 <div className="flex items-center gap-2 text-orange-600 font-black uppercase text-xs border-l-4 border-orange-600 pl-3 tracking-widest text-[10px]">TRADE LOGIC</div>
-                                 <p className="text-[11px] leading-relaxed font-bold text-slate-600"><strong className="text-slate-900 font-black">수입 관세 적용:</strong> 선택하신 품목에 맞춰 {customDutyRate}% 관세와 미국 MPF(세관수수료) $2.69가 포함된 가격입니다. 정확한 역산이 이루어집니다.</p>
+                             <div className="space-y-3">
+                                 <div className="flex items-center gap-2 text-orange-600 font-black uppercase text-[10px] border-l-4 border-orange-600 pl-3">DDP & Customs</div>
+                                 <p className="text-[11px] leading-relaxed font-bold text-slate-600">
+                                     <strong className="text-slate-900">DDP 리스팅:</strong> 판매자가 관세까지 선납하는 방식입니다. 구매자의 추가 비용이 없어 상단 노출에 매우 유리합니다.
+                                 </p>
                              </div>
-                             <div className="space-y-4">
-                                 <div className="flex items-center gap-2 text-green-600 font-black uppercase text-xs border-l-4 border-green-600 pl-3 tracking-widest text-[10px]">NET PROFIT</div>
-                                 <p className="text-[11px] leading-relaxed font-bold text-slate-600"><strong className="text-slate-900 font-black">최종 순이익(Profit):</strong> 이베이 수수료(16.5%)와 정산 수수료(1.2%)를 모두 공제한 뒤 통장에 최종 정산되는 원화(₩) 금액입니다.</p>
+                             <div className="space-y-3">
+                                 <div className="flex items-center gap-2 text-green-600 font-black uppercase text-[10px] border-l-4 border-green-600 pl-3">Tracking Actuals</div>
+                                 <p className="text-[11px] leading-relaxed font-bold text-slate-600">
+                                     <strong className="text-slate-900">사후 정산:</strong> 예상치 못한 할증료나 유류 할증료 변동분을 '사후 정산' 섹션에 넣어 최종 통장 입금액을 검증하세요.
+                                 </p>
                              </div>
                         </section>
 
-                        {/* 6. 플랫폼 트렌드 및 이베이 TOP 5 */}
+                        {/* 7. 트렌드 & TOP 5 리스트 */}
                         <section className="space-y-8">
-                            <h2 className="text-3xl font-black flex items-center gap-5 uppercase tracking-tighter px-10 border-l-8 border-indigo-600 ml-2"><i data-lucide="lightbulb" className="text-indigo-600"></i> 플랫폼별 인기 상품 트렌드 (Today)</h2>
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-                                {recommendations ? Object.keys(recommendations).map(platform => (
-                                    <div key={platform} className="bg-white p-8 rounded-[3rem] shadow-lg border border-slate-100 hover:border-indigo-300 transition-all">
-                                        <div className="flex items-center gap-3 mb-6 border-b pb-4"><div className={`p-2.5 rounded-xl ${platform === 'Google' ? 'bg-blue-50 text-blue-600' : platform === 'Naver' ? 'bg-green-50 text-green-600' : platform === 'Coupang' ? 'bg-red-50 text-red-600' : 'bg-rose-50 text-rose-600'}`}><i data-lucide={platform === 'Google' ? 'globe' : platform === 'Naver' ? 'search' : platform === 'Coupang' ? 'shopping-cart' : 'shopping-bag'} size={20}></i></div><h3 className="font-black text-lg uppercase tracking-wider">{platform}</h3></div>
-                                        <ul className="space-y-2">
-                                            {Array.isArray(recommendations[platform]) ? recommendations[platform].slice(0, 10).map((item, idx) => (<li key={idx} className="flex items-center gap-3 text-sm font-bold text-slate-600 keyword-item p-2" onClick={() => { setKeyword(item); window.scrollTo({top: 100, behavior: 'smooth'}); }}><span className="text-xs text-slate-300 w-4 font-black">{idx + 1}</span>{item}</li>)) : <li className="text-slate-400 py-10 text-center italic text-xs">데이터 로딩 중...</li>}
-                                        </ul>
+                            <h2 className="text-2xl font-black px-5 md:px-10 uppercase tracking-tighter italic text-indigo-600">eBay 실시간 판매율 TOP 5</h2>
+                            <div className="grid grid-cols-1 gap-3 px-2">
+                                {ebayTop5.length > 0 ? ebayTop5.map((item, idx) => (
+                                    <div key={idx} className="bg-slate-900 text-white hover:bg-slate-800 p-5 rounded-3xl transition-all flex items-center gap-6 group border border-white/5 shadow-2xl">
+                                        <div className="bg-blue-600 text-white w-10 h-10 rounded-full flex items-center justify-center font-black text-lg shadow-lg shrink-0">{idx + 1}</div>
+                                        <div className="flex-1 min-w-0">
+                                            <h4 className="text-lg font-black tracking-tight mb-0.5 truncate">{item.name}</h4>
+                                            <p className="text-[10px] text-slate-400 font-bold truncate opacity-80">{item.reason}</p>
+                                        </div>
+                                        <div className="text-right hidden sm:block">
+                                            <p className="text-[8px] font-black text-slate-500 uppercase">Growth</p>
+                                            <p className="text-green-400 font-black text-sm italic">{item.growth || "Rising"}</p>
+                                        </div>
+                                        <button onClick={() => { setKeyword(item.name); window.scrollTo({top: 100, behavior: 'smooth'}); }} className="bg-white text-slate-900 px-4 py-2 rounded-xl font-black text-[10px] uppercase hover:bg-blue-400 hover:text-white transition-all shrink-0">Analysis</button>
                                     </div>
-                                )) : <div className="col-span-4 text-center py-20 text-slate-400 italic font-black uppercase tracking-widest">Market Feed Syncing...</div>}
+                                )) : <div className="text-center py-10 text-slate-400 italic">데이터 수신 중...</div>}
                             </div>
-                        </section>
-
-                        <section className="bg-slate-900 rounded-[4rem] p-10 md:p-14 text-white relative shadow-2xl overflow-hidden border border-white/5">
-                             <div className="absolute right-0 bottom-0 p-10 opacity-5 pointer-events-none"><i data-lucide="bar-chart-2" size={240}></i></div>
-                             <div className="relative z-10 space-y-8">
-                                 <div className="flex justify-between items-center border-b border-white/10 pb-6">
-                                     <h2 className="text-2xl font-black uppercase flex items-center gap-3 tracking-widest italic text-blue-400"><i data-lucide="award" className="text-yellow-400"/> eBay 실시간 판매율 TOP 5 추천</h2>
-                                     <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest bg-white/5 px-4 py-2 rounded-full border border-white/10 italic">Research Mode Active</span>
-                                 </div>
-                                 <div className="grid grid-cols-1 gap-3">
-                                     {ebayTop5.length > 0 ? ebayTop5.map((item, idx) => (
-                                         <div key={idx} className="bg-white/5 hover:bg-white/10 p-5 rounded-[1.5rem] border border-white/5 transition-all flex items-center gap-6 group">
-                                             <div className="bg-blue-600 text-white w-10 h-10 rounded-full flex items-center justify-center font-black text-lg shrink-0 shadow-lg">{idx + 1}</div>
-                                             <div className="flex-1">
-                                                 <h4 className="text-lg font-black tracking-tight mb-1 group-hover:text-blue-400 transition-colors">{item.name}</h4>
-                                                 <p className="text-xs text-slate-400 font-bold">{item.reason}</p>
-                                             </div>
-                                             <div className="text-right shrink-0 px-4">
-                                                 <p className="text-[9px] font-black text-slate-500 uppercase">Growth</p>
-                                                 <p className="text-green-400 font-black text-base italic">{item.growth || "High"}</p>
-                                             </div>
-                                             <button onClick={() => { setKeyword(item.name); window.scrollTo({top: 300, behavior: 'smooth'}); }} className="bg-white text-slate-900 px-5 py-2 rounded-xl font-black text-[10px] uppercase hover:bg-blue-50 transition-all shrink-0 shadow-md">Analysis</button>
-                                         </div>
-                                     )) : <div className="text-center py-10 text-slate-500 italic">이베이 리서치 데이터를 분석 중입니다...</div>}
-                                 </div>
-                             </div>
                         </section>
 
                     </main>
 
-                    <footer className="max-w-7xl mx-auto px-10 py-20 text-center text-slate-400 border-t mt-20 font-bold uppercase tracking-[0.5em] text-sm opacity-40 italic">이베이 마진계산기 PRO 2026 - Logistics Metrics & Price Engine v16.2</footer>
+                    <footer className="max-w-7xl mx-auto px-10 py-16 text-center text-slate-400 border-t mt-12 font-bold uppercase tracking-[0.5em] text-[10px] opacity-40 italic">eBay Margin Calculator PRO 2026 - Actual Fee & Invoice Reconciliation v17.0</footer>
                 </div>
             );
         };
